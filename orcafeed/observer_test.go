@@ -152,3 +152,48 @@ func (dummyHasher) Update(_, _ []byte) error { return nil }
 func (dummyHasher) Hash() common.Hash        { return common.Hash{0xff} }
 
 var _ = uint256.NewInt // keep import if unused later
+
+func TestObserverEmitsCollectorLogsWithInnerIndex(t *testing.T) {
+	sink := &memSink{}
+	obs := NewBlockObserver(sink, "tx")
+	sdb := newTestStateDB(t)
+	to := common.HexToAddress("0x4444444444444444444444444444444444444444")
+	sender := common.HexToAddress("0x5555555555555555555555555555555555555555")
+
+	obs.BeginBlock(300, 1753689600)
+	h := obs.EVMHooks()
+	// transfer(inner 0) → log(inner 1)
+	h.OnBalanceChange(sender, big.NewInt(50), big.NewInt(20), tracing.BalanceChangeTransfer)
+	h.OnBalanceChange(to, big.NewInt(0), big.NewInt(30), tracing.BalanceChangeTransfer)
+	h.OnLog(&types.Log{Address: to, Topics: []common.Hash{{0x01}}, Data: []byte{0x02}})
+
+	tx, receipt := makeTxAndReceipt(to, 30, 1)
+	obs.OnTxAccepted(tx, sender, receipt, sdb, 0)
+
+	msg := sink.msgs[0].msg.(*ReceiptMsg)
+	if len(msg.Logs) != 1 || msg.Logs[0].InnerIndex != 1 {
+		t.Fatalf("로그 inner_index: %+v", msg.Logs)
+	}
+	if len(msg.Transfers) != 1 || msg.Transfers[0].InnerIndex != 0 {
+		t.Fatalf("transfer inner_index: %+v", msg.Transfers)
+	}
+}
+
+func TestObserverFallsBackWhenLogCountMismatches(t *testing.T) {
+	sink := &memSink{}
+	obs := NewBlockObserver(sink, "tx")
+	sdb := newTestStateDB(t)
+	to := common.HexToAddress("0x6666666666666666666666666666666666666666")
+	sender := common.HexToAddress("0x7777777777777777777777777777777777777777")
+
+	obs.BeginBlock(301, 0)
+	// collector에 로그를 넣지 않는다 — receipt.Logs(1건)와 불일치
+	tx, receipt := makeTxAndReceipt(to, 1, 1)
+	obs.OnTxAccepted(tx, sender, receipt, sdb, 0)
+
+	msg := sink.msgs[0].msg.(*ReceiptMsg)
+	// 폴백: receipt.Logs가 그대로 실린다
+	if len(msg.Logs) != 1 || msg.Logs[0].Address != to {
+		t.Fatalf("폴백 실패: %+v", msg.Logs)
+	}
+}

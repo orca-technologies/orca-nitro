@@ -27,6 +27,7 @@ type SweepObserver struct {
 type txCapture struct {
 	from      common.Address
 	transfers []TransferRecord
+	logs      []LogRecord
 }
 
 func NewSweepObserver(sink Sink, ranges [][2]uint64) *SweepObserver {
@@ -40,10 +41,14 @@ func NewSweepObserver(sink Sink, ranges [][2]uint64) *SweepObserver {
 		if tx == nil {
 			return
 		}
-		cp := &txCapture{from: from, transfers: nil}
+		cp := &txCapture{from: from, transfers: nil, logs: nil}
 		if len(transfers) > 0 {
 			cp.transfers = make([]TransferRecord, len(transfers))
 			copy(cp.transfers, transfers)
+		}
+		if ls := o.collector.DrainLogs(); len(ls) > 0 {
+			cp.logs = make([]LogRecord, len(ls))
+			copy(cp.logs, ls)
 		}
 		o.txCaps[tx.Hash()] = cp
 	})
@@ -71,11 +76,13 @@ func (o *SweepObserver) OnBlockExecuted(block *types.Block, receipts types.Recei
 		}
 		var sender common.Address
 		var transfers []TransferRecord
+		var logs []LogRecord
 		if cp, ok := o.txCaps[tx.Hash()]; ok {
 			sender = cp.from
 			transfers = cp.transfers
+			logs = cp.logs
 		}
-		msg := newReceiptMsg(blockNumber, block.Time(), i, tx, sender, receipts[i], transfers,
+		msg := newReceiptMsg(blockNumber, block.Time(), i, tx, sender, receipts[i], transfers, logs,
 			func(addr common.Address) bool { return isContractCached(statedb, codeCache, addr) })
 		msg.BlockHash = blockHash
 		o.sink.Enqueue(MsgReceipt, msg)

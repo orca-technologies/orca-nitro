@@ -1,4 +1,8 @@
-package orcafeed
+package orcasock
+
+import (
+	"github.com/offchainlabs/nitro/orcafeed"
+)
 
 import (
 	"encoding/binary"
@@ -12,14 +16,14 @@ import (
 )
 
 const (
-	frameHeaderSize  = 5 // u32 LE payload len + u8 MsgType
+	frameHeaderSize  = 5 // u32 LE payload len + u8 orcafeed.MsgType
 	connWriteTimeout = time.Second
 	closeFlushCap    = 5 * time.Second
 	dropLogThrottle  = time.Second
 )
 
 type queuedMsg struct {
-	typ MsgType
+	typ orcafeed.MsgType
 	seq uint64
 	msg msgp.Marshaler
 }
@@ -82,7 +86,7 @@ type Dispatcher struct {
 	bufPool sync.Pool
 }
 
-func NewDispatcher(cfg *Config, mode string) (*Dispatcher, error) {
+func NewDispatcher(cfg *orcafeed.Config, mode string) (*Dispatcher, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -118,7 +122,7 @@ func NewDispatcher(cfg *Config, mode string) (*Dispatcher, error) {
 
 // Enqueue는 seq를 부여해 ring에 넣는다. 논블로킹 — 가득 차면 oldest drop.
 // msg는 enqueue 이후 수정하면 안 된다 (writer가 비동기로 직렬화).
-func (d *Dispatcher) Enqueue(typ MsgType, msg seqSetter) {
+func (d *Dispatcher) Enqueue(typ orcafeed.MsgType, msg orcafeed.SeqSetter) {
 	// PERF:LOCK
 	//   cost: hold~ns (push + signal)
 	//   note: 실행 핫패스 유일한 동기화 지점
@@ -151,8 +155,8 @@ func (d *Dispatcher) acceptLoop() {
 		if err != nil {
 			return // listener closed
 		}
-		hello := Hello{SchemaVersion: SchemaVersion, Mode: d.mode}
-		frame := d.encodeFrame(MsgHello, &hello)
+		hello := orcafeed.Hello{SchemaVersion: orcafeed.SchemaVersion, Mode: d.mode}
+		frame := d.encodeFrame(orcafeed.MsgHello, &hello)
 		_ = conn.SetWriteDeadline(time.Now().Add(connWriteTimeout))
 		if _, err := conn.Write(frame); err != nil {
 			conn.Close()
@@ -189,7 +193,7 @@ func (d *Dispatcher) writeLoop() {
 }
 
 // encodeFrame: [u32 LE len][u8 type][payload]. 반환 버퍼는 releaseBuf로 반납.
-func (d *Dispatcher) encodeFrame(typ MsgType, msg msgp.Marshaler) []byte {
+func (d *Dispatcher) encodeFrame(typ orcafeed.MsgType, msg msgp.Marshaler) []byte {
 	buf := d.bufPool.Get().([]byte)[:0]
 	buf = append(buf, 0, 0, 0, 0, byte(typ))
 	buf, err := msg.MarshalMsg(buf)

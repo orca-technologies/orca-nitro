@@ -28,6 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/triedb"
 	"github.com/ethereum/go-ethereum/triedb/hashdb"
 
+	"github.com/offchainlabs/nitro/orcafeed"
 	"github.com/offchainlabs/nitro/util"
 	"github.com/offchainlabs/nitro/util/arbmath"
 	"github.com/offchainlabs/nitro/util/stopwaiter"
@@ -120,6 +121,15 @@ type BlocksReExecutor struct {
 	blocks        [][3]uint64 // start, end and minBlocksPerThread of block ranges
 	mutex         sync.Mutex
 	success       chan struct{}
+
+	// orca sweep dispatch (옵션). sink는 worker 간 공유, observer는 worker별 생성.
+	orcaSink   orcafeed.Sink
+	orcaRanges [][2]uint64 // dispatch 대상 원본 범위 (pre-state용 start-- 이전 값)
+}
+
+// SetOrcaSink — Start 이전 1회 주입. 설정 시 재실행 블록의 receipt·transfer를 dispatch한다.
+func (s *BlocksReExecutor) SetOrcaSink(sink orcafeed.Sink) {
+	s.orcaSink = sink
 }
 
 func New(c *Config, blockchain *core.BlockChain, ethDb ethdb.Database) (*BlocksReExecutor, error) {
@@ -133,6 +143,7 @@ func New(c *Config, blockchain *core.BlockChain, ethDb ethdb.Database) (*BlocksR
 		minBlocksPerThread = c.MinBlocksPerThread
 	}
 	var blocks [][3]uint64
+	var orcaRanges [][2]uint64
 	for _, blockRange := range c.blocks {
 		start := blockRange[0]
 		end := blockRange[1]
@@ -160,6 +171,7 @@ func New(c *Config, blockchain *core.BlockChain, ethDb ethdb.Database) (*BlocksR
 		}
 		// Inclusive of block reexecution [start, end]
 		// Do not reexecute genesis block i,e chainStart
+		orcaRanges = append(orcaRanges, [2]uint64{start, end})
 		if start > 0 && start != chainStart {
 			start--
 		}
@@ -211,6 +223,8 @@ func New(c *Config, blockchain *core.BlockChain, ethDb ethdb.Database) (*BlocksR
 		fatalReported: atomic.Bool{},
 		success:       make(chan struct{}),
 		mutex:         sync.Mutex{},
+		orcaSink:      nil,
+		orcaRanges:    orcaRanges,
 	}
 	return blocksReExecutor, nil
 }
@@ -271,13 +285,20 @@ func (s *BlocksReExecutor) LaunchBlocksReExecution(ctx context.Context, startBlo
 	launched = true
 	s.LaunchThread(func(ctx context.Context) {
 		defer func() { s.done <- struct{}{} }()
+		var orcaObserver *orcafeed.SweepObserver
+		if s.orcaSink != nil {
+			orcaObserver = orcafeed.NewSweepObserver(s.orcaSink, s.orcaRanges)
+		}
 		log.Info("Starting reexecution of blocks against historic state", "stateAt", start, "startBlock", start+1, "endBlock", currentBlock)
-		if err := s.advanceStateUpToBlock(ctx, startState, targetHeader, startHeader, release); err != nil {
+		if err := s.advanceStateUpToBlock(ctx, startState, targetHeader, startHeader, release, orcaObserver); err != nil {
 			if ctx.Err() == nil {
 				s.reportFatalErr(fmt.Errorf("blocksReExecutor errored advancing state from block %d to block %d, err: %w", start, currentBlock, err))
 			}
 		} else {
 			log.Info("Successfully reexecuted blocks against historic state", "stateAt", start, "startBlock", start+1, "endBlock", currentBlock)
+			if orcaObserver != nil {
+				orcaObserver.OnRangeDone(start+1, currentBlock)
+			}
 		}
 	})
 	return start
@@ -381,7 +402,7 @@ func (s *BlocksReExecutor) commitStateAndVerify(statedb *state.StateDB, expected
 	return sdb, arbitrum.NoopStateRelease, err
 }
 
-func (s *BlocksReExecutor) advanceStateUpToBlock(ctx context.Context, state *state.StateDB, targetHeader *types.Header, lastAvailableHeader *types.Header, lastRelease arbitrum.StateReleaseFunc) error {
+func (s *BlocksReExecutor) advanceStateUpToBlock(ctx context.Context, state *state.StateDB, targetHeader *types.Header, lastAvailableHeader *types.Header, lastRelease arbitrum.StateReleaseFunc, orcaObserver *orcafeed.SweepObserver) error {
 	targetBlockNumber := targetHeader.Number.Uint64()
 	blockToRecreate := lastAvailableHeader.Number.Uint64() + 1
 	prevHash := lastAvailableHeader.Hash()
@@ -393,6 +414,9 @@ func (s *BlocksReExecutor) advanceStateUpToBlock(ctx context.Context, state *sta
 	var err error
 	vmConfig := vm.Config{
 		ExposeMultiGas: s.config.ValidateMultiGas,
+	}
+	if orcaObserver != nil {
+		vmConfig.Tracer = orcaObserver.Hooks()
 	}
 	for ctx.Err() == nil {
 		var receipts types.Receipts
@@ -421,6 +445,10 @@ func (s *BlocksReExecutor) advanceStateUpToBlock(ctx context.Context, state *sta
 						block.NumberU64(), receipt.TxHash, receipt.GasUsed, receipt.MultiGasUsed.SingleGas())
 				}
 			}
+		}
+
+		if orcaObserver != nil {
+			orcaObserver.OnBlockExecuted(block, receipts, state)
 		}
 
 		prevHash = block.Hash()

@@ -128,7 +128,6 @@ func newReceiptMsg(blockNumber, l2Timestamp uint64, txIndex int, tx *types.Trans
 		// #nosec G115
 		TxIndex:           uint32(txIndex),
 		L2Timestamp:       l2Timestamp,
-		TxHash:            tx.Hash(),
 		TxType:            tx.Type(),
 		From:              sender,
 		To:                [20]byte{},

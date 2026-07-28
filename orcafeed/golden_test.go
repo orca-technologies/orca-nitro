@@ -21,7 +21,7 @@ func goldenMessages() map[string]msgp.Marshaler {
 		"hello": &Hello{SchemaVersion: SchemaVersion, Mode: ModeLiveTx},
 		"receipt": &ReceiptMsg{
 			Seq: 7, BlockNumber: 123456, BlockHash: hash(0xbb), TxIndex: 2,
-			L2Timestamp: 1753689600, TxHash: hash(0xaa), TxType: 2,
+			L2Timestamp: 1753689600, TxType: 2,
 			From: addr(0x01), To: addr(0x02), ToIsContract: true,
 			Nonce: 9, Gas: 21000, EffectiveGasPrice: []byte{0x3b, 0x9a, 0xca, 0x00},
 			Value:    []byte{0x0d, 0xe0, 0xb6, 0xb3, 0xa7, 0x64, 0x00, 0x00},

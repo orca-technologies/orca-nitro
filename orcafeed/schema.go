@@ -6,7 +6,7 @@ package orcafeed
 //go:generate msgp -tests=false
 
 // SchemaVersion은 hello frame으로 전달되어 클라이언트와의 lockstep 배포를 검증한다.
-const SchemaVersion uint32 = 1
+const SchemaVersion uint32 = 2
 
 // 프레임 형식: [u32 LE payload length][u8 MsgType][msgpack payload]
 type MsgType byte
@@ -74,6 +74,10 @@ type ReceiptMsg struct {
 	CumulativeGasUsed uint64
 	Logs              []LogRecord
 	Transfers         []TransferRecord
+	// 노드가 이 receipt를 방출한 시각 (unix ns). retention replay 시에도 원래
+	// 방출 시각이 보존된다 — reader의 live feed ts 기준. sweep 재실행에선
+	// 재실행 시각이므로 의미 없음 (reader가 l2 timestamp 합성 사용).
+	EmittedAtNs uint64
 }
 
 //msgp:tuple BlockSealMsg

@@ -1,6 +1,8 @@
 package orcafeed
 
 import (
+	"time"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/tracing"
@@ -136,6 +138,8 @@ func newReceiptMsg(blockNumber, l2Timestamp uint64, txIndex int, tx *types.Trans
 		CumulativeGasUsed: receipt.CumulativeGasUsed,
 		Logs:              nil,
 		Transfers:         transfers,
+		// #nosec G115
+		EmittedAtNs: uint64(time.Now().UnixNano()),
 	}
 	if to := tx.To(); to != nil {
 		msg.To = *to

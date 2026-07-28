@@ -16,21 +16,26 @@ type Collector struct {
 
 	// 현재 tx 수집 상태
 	// PERF:MEM-GROW
-	//   cost: mem=O(N_transfers)·~120B, N~1e0..1e2/tx → 재사용으로 상쇄
-	//   note: records는 Drain 후 재사용 (capacity 유지)
+	//   cost: mem=O(N_transfers+N_logs)·~120B, N~1e0..1e2/tx → 재사용으로 상쇄
+	//   note: records·logs는 Drain 후 재사용 (capacity 유지)
 	records []TransferRecord
-	frames  []frameMark // open frame 스택
-	pending *pendingSub // 쌍 대기 중인 Transfer sub 이벤트
-	txFrom  common.Address
-	tx      *types.Transaction
+	logs    []LogRecord
+	// tx 안 방출 순번 — 로그와 transfer가 공유한다. revert된 항목도 번호를 소비하므로
+	// 살아남은 항목의 상대 순서가 보존된다.
+	innerNext uint16
+	frames    []frameMark // open frame 스택
+	pending   *pendingSub // 쌍 대기 중인 Transfer sub 이벤트
+	txFrom    common.Address
+	tx        *types.Transaction
 
 	// sweep 경로: OnTxEnd(receipt) 시점 콜백 — receipt와 수집분이 정렬돼 전달된다
 	onTxEnd func(tx *types.Transaction, from common.Address, receipt *types.Receipt, transfers []TransferRecord)
 }
 
 type frameMark struct {
-	depth    uint16
-	startIdx int // 이 frame 진입 시점의 records 길이
+	depth       uint16
+	startIdx    int // 이 frame 진입 시점의 records 길이
+	logStartIdx int // 이 frame 진입 시점의 logs 길이
 }
 
 type pendingSub struct {
@@ -57,13 +62,15 @@ var includedReasons = map[tracing.BalanceChangeReason]bool{
 
 func NewCollector() *Collector {
 	c := &Collector{
-		hooks:   nil,
-		records: nil,
-		frames:  nil,
-		pending: nil,
-		txFrom:  common.Address{},
-		tx:      nil,
-		onTxEnd: nil,
+		hooks:     nil,
+		records:   nil,
+		logs:      nil,
+		innerNext: 0,
+		frames:    nil,
+		pending:   nil,
+		txFrom:    common.Address{},
+		tx:        nil,
+		onTxEnd:   nil,
 	}
 	c.hooks = &tracing.Hooks{
 		OnTxStart:       c.onTxStartHook,
@@ -71,6 +78,7 @@ func NewCollector() *Collector {
 		OnEnter:         c.onEnter,
 		OnExit:          c.onExit,
 		OnBalanceChange: c.onBalanceChange,
+		OnLog:           c.onLog,
 	}
 	return c
 }
@@ -95,8 +103,39 @@ func (c *Collector) TxSender() common.Address { return c.txFrom }
 
 func (c *Collector) Reset() {
 	c.records = c.records[:0]
+	c.logs = c.logs[:0]
+	c.innerNext = 0
 	c.frames = c.frames[:0]
 	c.pending = nil
+}
+
+// DrainLogs — revert되지 않은 로그를 방출 순서대로 반환한다.
+// 반환 슬라이스는 다음 tx 수집 시작(Reset) 전까지만 유효 — 이후 재사용된다.
+func (c *Collector) DrainLogs() []LogRecord {
+	return c.logs
+}
+
+func (c *Collector) onLog(log *types.Log) {
+	c.flushPending()
+	topics := make([][32]byte, len(log.Topics))
+	for i, t := range log.Topics {
+		topics[i] = t
+	}
+	c.logs = append(c.logs, LogRecord{
+		Address:    log.Address,
+		Topics:     topics,
+		Data:       log.Data,
+		InnerIndex: c.nextInner(),
+	})
+}
+
+// nextInner — 로그·transfer가 공유하는 tx-local 시퀀스. saturate로 wrap을 막는다.
+func (c *Collector) nextInner() uint16 {
+	i := c.innerNext
+	if c.innerNext < ^uint16(0) {
+		c.innerNext++
+	}
+	return i
 }
 
 func (c *Collector) onTxStartHook(_ *tracing.VMContext, tx *types.Transaction, from common.Address) {
@@ -121,7 +160,11 @@ func (c *Collector) onTxEndHook(receipt *types.Receipt, err error) {
 func (c *Collector) onEnter(depth int, _ byte, _ common.Address, _ common.Address, _ []byte, _ uint64, _ *big.Int) {
 	c.flushPending()
 	// #nosec G115
-	c.frames = append(c.frames, frameMark{depth: uint16(depth), startIdx: len(c.records)})
+	c.frames = append(c.frames, frameMark{
+		depth:       uint16(depth),
+		startIdx:    len(c.records),
+		logStartIdx: len(c.logs),
+	})
 }
 
 func (c *Collector) onExit(_ int, _ []byte, _ uint64, _ error, reverted bool) {
@@ -132,10 +175,12 @@ func (c *Collector) onExit(_ int, _ []byte, _ uint64, _ error, reverted bool) {
 	frame := c.frames[len(c.frames)-1]
 	c.frames = c.frames[:len(c.frames)-1]
 	if reverted {
-		// 이 frame span 내 모든 record (더 깊은 frame 포함) revert 마킹
+		// transfer는 "시도됐다 무효화됨"이 신호가 되므로 플래그만 세운다.
 		for i := frame.startIdx; i < len(c.records); i++ {
 			c.records[i].Reverted = true
 		}
+		// 로그는 receipt.Logs에 남지 않으므로 버린다 — 시퀀스 번호는 이미 소비됐다.
+		c.logs = c.logs[:frame.logStartIdx]
 	}
 }
 
@@ -226,5 +271,6 @@ func (c *Collector) flushPending() {
 }
 
 func (c *Collector) append(r TransferRecord) {
+	r.InnerIndex = c.nextInner()
 	c.records = append(c.records, r)
 }

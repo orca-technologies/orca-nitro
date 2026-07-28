@@ -307,8 +307,8 @@ func (z *LogRecord) DecodeMsg(dc *msgp.Reader) (err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 5 {
-		err = msgp.ArrayError{Wanted: 5, Got: zb0001}
+	if zb0001 != 4 {
+		err = msgp.ArrayError{Wanted: 4, Got: zb0001}
 		return
 	}
 	err = dc.ReadExactBytes((z.Address)[:])
@@ -344,18 +344,13 @@ func (z *LogRecord) DecodeMsg(dc *msgp.Reader) (err error) {
 		err = msgp.WrapError(err, "InnerIndex")
 		return
 	}
-	z.LogIndex, err = dc.ReadUint32()
-	if err != nil {
-		err = msgp.WrapError(err, "LogIndex")
-		return
-	}
 	return
 }
 
 // EncodeMsg implements msgp.Encodable
 func (z *LogRecord) EncodeMsg(en *msgp.Writer) (err error) {
-	// array header, size 5
-	err = en.Append(0x95)
+	// array header, size 4
+	err = en.Append(0x94)
 	if err != nil {
 		return
 	}
@@ -386,19 +381,14 @@ func (z *LogRecord) EncodeMsg(en *msgp.Writer) (err error) {
 		err = msgp.WrapError(err, "InnerIndex")
 		return
 	}
-	err = en.WriteUint32(z.LogIndex)
-	if err != nil {
-		err = msgp.WrapError(err, "LogIndex")
-		return
-	}
 	return
 }
 
 // MarshalMsg implements msgp.Marshaler
 func (z *LogRecord) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.Require(b, z.Msgsize())
-	// array header, size 5
-	o = append(o, 0x95)
+	// array header, size 4
+	o = append(o, 0x94)
 	o = msgp.AppendBytes(o, (z.Address)[:])
 	o = msgp.AppendArrayHeader(o, uint32(len(z.Topics)))
 	for za0002 := range z.Topics {
@@ -406,7 +396,6 @@ func (z *LogRecord) MarshalMsg(b []byte) (o []byte, err error) {
 	}
 	o = msgp.AppendBytes(o, z.Data)
 	o = msgp.AppendUint16(o, z.InnerIndex)
-	o = msgp.AppendUint32(o, z.LogIndex)
 	return
 }
 
@@ -418,8 +407,8 @@ func (z *LogRecord) UnmarshalMsg(bts []byte) (o []byte, err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 5 {
-		err = msgp.ArrayError{Wanted: 5, Got: zb0001}
+	if zb0001 != 4 {
+		err = msgp.ArrayError{Wanted: 4, Got: zb0001}
 		return
 	}
 	bts, err = msgp.ReadExactBytes(bts, (z.Address)[:])
@@ -455,18 +444,13 @@ func (z *LogRecord) UnmarshalMsg(bts []byte) (o []byte, err error) {
 		err = msgp.WrapError(err, "InnerIndex")
 		return
 	}
-	z.LogIndex, bts, err = msgp.ReadUint32Bytes(bts)
-	if err != nil {
-		err = msgp.WrapError(err, "LogIndex")
-		return
-	}
 	o = bts
 	return
 }
 
 // Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
 func (z *LogRecord) Msgsize() (s int) {
-	s = 1 + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.ArrayHeaderSize + (len(z.Topics) * (32 * (msgp.ByteSize))) + msgp.BytesPrefixSize + len(z.Data) + msgp.Uint16Size + msgp.Uint32Size
+	s = 1 + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.ArrayHeaderSize + (len(z.Topics) * (32 * (msgp.ByteSize))) + msgp.BytesPrefixSize + len(z.Data) + msgp.Uint16Size
 	return
 }
 

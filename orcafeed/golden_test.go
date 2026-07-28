@@ -27,7 +27,7 @@ func goldenMessages() map[string]msgp.Marshaler {
 			Value:    []byte{0x0d, 0xe0, 0xb6, 0xb3, 0xa7, 0x64, 0x00, 0x00},
 			Calldata: []byte{0xde, 0xad, 0xbe, 0xef}, Status: 1,
 			GasUsed: 21000, CumulativeGasUsed: 42000,
-			Logs: []LogRecord{{Address: addr(0x03), Topics: [][32]byte{hash(0xcc)}, Data: []byte{0x01}, InnerIndex: 1, LogIndex: 7}},
+			Logs: []LogRecord{{Address: addr(0x03), Topics: [][32]byte{hash(0xcc)}, Data: []byte{0x01}, InnerIndex: 1}},
 			Transfers: []TransferRecord{{
 				Reason: 10, From: addr(0x01), To: addr(0x02),
 				Value:           []byte{0x0d, 0xe0, 0xb6, 0xb3, 0xa7, 0x64, 0x00, 0x00},

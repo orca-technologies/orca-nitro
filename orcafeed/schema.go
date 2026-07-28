@@ -56,9 +56,6 @@ type LogRecord struct {
 	Data    []byte
 	// TransferRecord.InnerIndex와 같은 시퀀스 — 로그와 transfer의 실제 interleave.
 	InnerIndex uint16
-	// 체인이 매긴 블록 전역 로그 번호 (receipt.Logs[i].Index). 외부 EVM 도구와
-	// 조인하는 on-chain 좌표다. 정렬은 InnerIndex가 맡는다.
-	LogIndex uint32
 }
 
 //msgp:tuple ReceiptMsg

@@ -14,7 +14,7 @@ Robinhood Chain(RHC) 노드를 직접 운영하며, sequencer live feed로 들�
 | 노드 | 스냅샷 | 역할 |
 |---|---|---|
 | live 노드 | 공식 pruned (hash 스킴) | feed 수신 → 실행 → 즉시 dispatch. L1 reader **유지**(finality·self-healing·pruner), staker/batch-poster/sequencer off, RPC는 디버깅 최소한 |
-| sweep 노드 | Titan archive (hash 스킴, 매일 재컷) 복원 | catchup off, `sweep` 모드로 range 재실행 → dispatch. 사이클마다 Titan 재부트스트랩 (기존 dora-master ops 패턴 유지) |
+| sweep 노드 | Titan archive (**path 스킴 + archive**, 매일 재컷) 복원 | catchup off, `sweep` 모드로 range 재실행 → dispatch. path 모드는 HistoricReader로 블록별 과거 state 직접 접근. 사이클마다 Titan 재부트스트랩 (기존 dora-master ops 패턴 유지) |
 
 - 메모리 방침: 캐시(trie/snapshot/database)는 **키우는 방향** — state를 RAM에 상주시켜
   핫패스 디스크 리드를 제거한다. "memory expansion 최소화"는 핫패스 할당·GC 압력

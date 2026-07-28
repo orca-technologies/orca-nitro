@@ -6,7 +6,9 @@ package orcafeed
 //go:generate msgp -tests=false
 
 // SchemaVersion은 hello frame으로 전달되어 클라이언트와의 lockstep 배포를 검증한다.
-const SchemaVersion uint32 = 2
+// 프로덕션 배포 전까지는 v1으로 고정한다 — 개발 중 필드 변경은 양쪽을 함께 고치고
+// golden fixture만 재생성한다 (bump는 배포된 컨슈머가 생긴 뒤부터).
+const SchemaVersion uint32 = 1
 
 // 프레임 형식: [u32 LE payload length][u8 MsgType][msgpack payload]
 type MsgType byte

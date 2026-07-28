@@ -6,6 +6,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/tracing"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 )
 
@@ -141,5 +142,70 @@ func TestCollectorSelfdestructPair(t *testing.T) {
 	}
 	if recs[0].Reason != uint8(tracing.BalanceIncreaseSelfdestruct) {
 		t.Fatalf("reason 보존: %+v", recs[0])
+	}
+}
+
+func TestCollectorInterleavesLogsAndTransfers(t *testing.T) {
+	c := NewCollector()
+	h := c.Hooks()
+
+	// tx 진입 시 top-level transfer → inner 0
+	bal(c, addrA, 100, 70, tracing.BalanceChangeTransfer)
+	bal(c, addrB, 0, 30, tracing.BalanceChangeTransfer)
+	// 로그 하나 → inner 1
+	h.OnLog(&types.Log{Address: addrB, Topics: []common.Hash{{0x11}}, Data: []byte{0x01}})
+	// internal call 안에서 transfer → inner 2, 로그 → inner 3
+	h.OnEnter(1, byte(vm.CALL), addrB, addrA, nil, 0, big.NewInt(5))
+	bal(c, addrB, 30, 25, tracing.BalanceChangeTransfer)
+	bal(c, addrA, 70, 75, tracing.BalanceChangeTransfer)
+	h.OnLog(&types.Log{Address: addrA, Topics: []common.Hash{{0x22}}, Data: nil})
+	h.OnExit(1, nil, 0, nil, false)
+
+	transfers := c.Drain()
+	logs := c.DrainLogs()
+	if len(transfers) != 2 || len(logs) != 2 {
+		t.Fatalf("수집 개수: transfers=%d logs=%d", len(transfers), len(logs))
+	}
+	if transfers[0].InnerIndex != 0 || logs[0].InnerIndex != 1 ||
+		transfers[1].InnerIndex != 2 || logs[1].InnerIndex != 3 {
+		t.Fatalf("interleave 순서: t0=%d l0=%d t1=%d l1=%d",
+			transfers[0].InnerIndex, logs[0].InnerIndex,
+			transfers[1].InnerIndex, logs[1].InnerIndex)
+	}
+	if logs[0].Address != addrB || logs[1].Address != addrA {
+		t.Fatalf("로그 내용: %+v", logs)
+	}
+}
+
+func TestCollectorDropsRevertedLogs(t *testing.T) {
+	c := NewCollector()
+	h := c.Hooks()
+
+	h.OnLog(&types.Log{Address: addrA, Topics: nil, Data: nil}) // 살아남음
+	h.OnEnter(1, byte(vm.CALL), addrA, addrB, nil, 0, big.NewInt(0))
+	h.OnLog(&types.Log{Address: addrB, Topics: nil, Data: nil}) // revert됨
+	h.OnExit(1, nil, 0, nil, true)
+
+	logs := c.DrainLogs()
+	if len(logs) != 1 || logs[0].Address != addrA {
+		t.Fatalf("revert된 로그가 남음: %+v", logs)
+	}
+	// revert된 항목도 시퀀스 번호는 소비한다 — 살아남은 로그의 inner_index는 0
+	if logs[0].InnerIndex != 0 {
+		t.Fatalf("inner_index: %d", logs[0].InnerIndex)
+	}
+}
+
+func TestCollectorResetClearsLogs(t *testing.T) {
+	c := NewCollector()
+	c.Hooks().OnLog(&types.Log{Address: addrA})
+	c.Reset()
+	if len(c.DrainLogs()) != 0 {
+		t.Fatal("Reset 후 로그가 남음")
+	}
+	// 새 tx의 첫 이벤트는 다시 0
+	c.Hooks().OnLog(&types.Log{Address: addrB})
+	if l := c.DrainLogs(); len(l) != 1 || l[0].InnerIndex != 0 {
+		t.Fatalf("inner_index 리셋 실패: %+v", l)
 	}
 }

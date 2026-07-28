@@ -601,8 +601,8 @@ func (z *ReceiptMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 21 {
-		err = msgp.ArrayError{Wanted: 21, Got: zb0001}
+	if zb0001 != 22 {
+		err = msgp.ArrayError{Wanted: 22, Got: zb0001}
 		return
 	}
 	z.Seq, err = dc.ReadUint64()
@@ -736,13 +736,18 @@ func (z *ReceiptMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 			return
 		}
 	}
+	z.EmittedAtNs, err = dc.ReadUint64()
+	if err != nil {
+		err = msgp.WrapError(err, "EmittedAtNs")
+		return
+	}
 	return
 }
 
 // EncodeMsg implements msgp.Encodable
 func (z *ReceiptMsg) EncodeMsg(en *msgp.Writer) (err error) {
-	// array header, size 21
-	err = en.Append(0xdc, 0x0, 0x15)
+	// array header, size 22
+	err = en.Append(0xdc, 0x0, 0x16)
 	if err != nil {
 		return
 	}
@@ -865,14 +870,19 @@ func (z *ReceiptMsg) EncodeMsg(en *msgp.Writer) (err error) {
 			return
 		}
 	}
+	err = en.WriteUint64(z.EmittedAtNs)
+	if err != nil {
+		err = msgp.WrapError(err, "EmittedAtNs")
+		return
+	}
 	return
 }
 
 // MarshalMsg implements msgp.Marshaler
 func (z *ReceiptMsg) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.Require(b, z.Msgsize())
-	// array header, size 21
-	o = append(o, 0xdc, 0x0, 0x15)
+	// array header, size 22
+	o = append(o, 0xdc, 0x0, 0x16)
 	o = msgp.AppendUint64(o, z.Seq)
 	o = msgp.AppendUint64(o, z.BlockNumber)
 	o = msgp.AppendBytes(o, (z.BlockHash)[:])
@@ -908,6 +918,7 @@ func (z *ReceiptMsg) MarshalMsg(b []byte) (o []byte, err error) {
 			return
 		}
 	}
+	o = msgp.AppendUint64(o, z.EmittedAtNs)
 	return
 }
 
@@ -919,8 +930,8 @@ func (z *ReceiptMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 21 {
-		err = msgp.ArrayError{Wanted: 21, Got: zb0001}
+	if zb0001 != 22 {
+		err = msgp.ArrayError{Wanted: 22, Got: zb0001}
 		return
 	}
 	z.Seq, bts, err = msgp.ReadUint64Bytes(bts)
@@ -1054,6 +1065,11 @@ func (z *ReceiptMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 			return
 		}
 	}
+	z.EmittedAtNs, bts, err = msgp.ReadUint64Bytes(bts)
+	if err != nil {
+		err = msgp.WrapError(err, "EmittedAtNs")
+		return
+	}
 	o = bts
 	return
 }
@@ -1068,6 +1084,7 @@ func (z *ReceiptMsg) Msgsize() (s int) {
 	for za0007 := range z.Transfers {
 		s += z.Transfers[za0007].Msgsize()
 	}
+	s += msgp.Uint64Size
 	return
 }
 

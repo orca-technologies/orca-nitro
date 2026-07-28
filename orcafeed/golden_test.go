@@ -34,6 +34,7 @@ func goldenMessages() map[string]msgp.Marshaler {
 				PostBalanceFrom: []byte{0x01}, PostBalanceTo: []byte{0x02},
 				Depth: 0, Reverted: false,
 			}},
+			EmittedAtNs: 1_753_689_600_123_456_789,
 		},
 		"blockseal":    &BlockSealMsg{Seq: 8, BlockNumber: 123456, BlockHash: hash(0xbb), TxCount: 3},
 		"invalidation": &InvalidationMsg{Seq: 9, BlockNumber: 123456},

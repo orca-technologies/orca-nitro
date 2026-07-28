@@ -71,7 +71,11 @@ msgpack은 **array-mode**(필드명 없음, 위치 기반). 스키마 변경 시
 `seq, blockNumber, blockHash(32B, tx모드 zero), txIndex, l2Timestamp, txHash(32B),
 txType, from(20B), to(20B), toIsContract, contractAddress(20B), nonce, gas,
 effectiveGasPrice(BE bytes), value(BE bytes), calldata, status, gasUsed,
-cumulativeGasUsed, logs[], transfers[]`
+cumulativeGasUsed, logs[], transfers[], emittedAtNs`
+
+`emittedAtNs`: 노드 방출 시각(unix ns) — retention replay에도 원래 시각이 보존되므로
+reader는 live 모드에서 이 값을 feed ts 기준으로 쓴다 (backlog가 쏟아져도 시간 뭉개짐 없음).
+sweep에선 재실행 시각이라 무의미 — reader가 l2Timestamp 합성을 쓴다.
 
 `LogRecord`: `[address(20B), topics[](32B), data]`
 

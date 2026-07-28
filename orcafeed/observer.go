@@ -158,11 +158,6 @@ func newReceiptMsg(blockNumber, l2Timestamp uint64, txIndex int, tx *types.Trans
 	// 상태라 receipt.Logs와 개수가 같아야 한다 — 어긋나면 관측 누락이므로
 	// 경고하고 receipt.Logs로 폴백한다 (순서 정보는 잃되 데이터는 지킨다).
 	if len(logs) == len(receipt.Logs) {
-		// 체인 로그 번호는 receipt에만 있다 — 같은 순서로 짝지어 붙인다.
-		for i := range logs {
-			// #nosec G115
-			logs[i].LogIndex = uint32(receipt.Logs[i].Index)
-		}
 		msg.Logs = logs
 	} else {
 		log.Warn("orcafeed: collector log count mismatch, falling back to receipt logs",
@@ -174,14 +169,7 @@ func newReceiptMsg(blockNumber, l2Timestamp uint64, txIndex int, tx *types.Trans
 				for j, topic := range l.Topics {
 					topics[j] = topic
 				}
-				// #nosec G115
-				msg.Logs[i] = LogRecord{
-					Address:    l.Address,
-					Topics:     topics,
-					Data:       l.Data,
-					InnerIndex: 0,
-					LogIndex:   uint32(l.Index),
-				}
+				msg.Logs[i] = LogRecord{Address: l.Address, Topics: topics, Data: l.Data, InnerIndex: 0}
 			}
 		}
 	}

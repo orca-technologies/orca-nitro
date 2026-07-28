@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"sync"
 	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/arbitrum/multigas"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/tracing"
@@ -55,7 +55,7 @@ type Storage struct {
 	db         vm.StateDB
 	storageKey []byte
 	burner     burn.Burner
-	hashCache  *shardedHashCache
+	hashCache  *hashCache
 }
 
 const StorageReadCost = params.SloadGasEIP2200
@@ -63,43 +63,45 @@ const StorageWriteCost = params.SstoreSetGasEIP2200
 const StorageWriteZeroCost = params.SstoreResetGasEIP2200
 const StorageCodeHashCost = params.ColdAccountAccessCostEIP2929
 
-const storageKeyCacheSize = 1024
-const hashCacheShards = 64
+// ArbOS storage 서브스페이스 키 캐시 상한. 키 집합은 정적이라고 전제한다 —
+// 넘치면 캐싱을 멈추고 경고한다 (미스는 재계산일 뿐 정확성에 영향 없음).
+const storageKeyCacheSize = 64 * 1024
 
-// shardedHashCache — 병렬 블록 재실행(blocks_reexecutor)에서 전역 단일 LRU 뮤텍스가
-// 병목이라 샤딩한다 (44 워커가 storage 키 해시마다 한 락에 직렬화되는 것을 pprof로
-// 확인). 단일 스레드 경로 추가 비용은 shard 선택 해시 몇 ns뿐.
-type shardedHashCache struct {
-	shards [hashCacheShards]*lru.Cache[string, []byte]
+// hashCache — keccak 캐시. 읽기가 lock-free다.
+//
+// 병렬 블록 재실행(blocks_reexecutor)에서 워커 수십 개가 **같은 소수의 키**를 읽는다
+// (모두 동일한 ArbOS 서브스페이스를 연다). 그래서 키 기준 샤딩이 듣지 않았다 —
+// 64 샤드에서도 44 워커 중 19개가 같은 락을 기다렸다 (2026-07-28 goroutine 덤프 실측).
+// 경합을 없애려면 분산이 아니라 읽기에서 락 자체를 빼야 한다.
+//
+// eviction은 없다. 상한에 닿으면 추가를 멈춘다 — LRU 교체는 다시 쓰기 락을 부르는데,
+// 정적 키 집합 전제에서는 이득이 없다.
+type hashCache struct {
+	m     sync.Map // string -> []byte (immutable, 공유 안전)
+	count atomic.Int64
 }
 
-func newShardedHashCache(sizePerShard int) *shardedHashCache {
-	c := &shardedHashCache{shards: [hashCacheShards]*lru.Cache[string, []byte]{}}
-	for i := range c.shards {
-		c.shards[i] = lru.NewCache[string, []byte](sizePerShard)
+func (c *hashCache) Get(key string) ([]byte, bool) {
+	v, ok := c.m.Load(key)
+	if !ok {
+		return nil, false
 	}
-	return c
+	// #nosec G103 — 저장된 값은 keccak 결과로 불변이며 호출자는 읽기만 한다.
+	return v.([]byte), true
 }
 
-// fnv-1a over 마지막 8바이트 — storage 키는 접미부 변별력이 가장 크다
-func (c *shardedHashCache) shard(key string) *lru.Cache[string, []byte] {
-	var h uint32 = 2166136261
-	start := 0
-	if len(key) > 8 {
-		start = len(key) - 8
+// Add는 상한에 닿아 더 캐싱하지 않을 때 true를 반환한다 (호출자가 1회 경고).
+func (c *hashCache) Add(key string, value []byte) bool {
+	if c.count.Load() >= storageKeyCacheSize {
+		return true
 	}
-	for i := start; i < len(key); i++ {
-		h = (h ^ uint32(key[i])) * 16777619
+	if _, loaded := c.m.LoadOrStore(key, value); !loaded {
+		c.count.Add(1)
 	}
-	return c.shards[h%hashCacheShards]
+	return false
 }
 
-func (c *shardedHashCache) Get(key string) ([]byte, bool) { return c.shard(key).Get(key) }
-func (c *shardedHashCache) Add(key string, value []byte) bool {
-	return c.shard(key).Add(key, value)
-}
-
-var storageHashCache = newShardedHashCache(storageKeyCacheSize)
+var storageHashCache = &hashCache{m: sync.Map{}, count: atomic.Int64{}}
 var cacheFullLogged atomic.Bool
 
 // KVStorage uses a Geth database to create an evm key-value store for an arbitrary account.

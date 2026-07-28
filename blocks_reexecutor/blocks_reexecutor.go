@@ -109,6 +109,10 @@ func ConfigAddOptions(prefix string, f *pflag.FlagSet) {
 	f.Bool(prefix+".validate-multigas", DefaultConfig.ValidateMultiGas, "if set, validate the sum of multi-gas dimensions match the single-gas")
 }
 
+// path 모드에서 statedb를 재사용하는 최대 블록 수 — dirty set 누적(메모리)과
+// historic reader 재오픈 비용(시간)의 절충. 1000이면 재오픈 비용은 0.1%로 상각된다.
+const historicReopenInterval = 1000
+
 // lint:require-exhaustive-initialization
 type BlocksReExecutor struct {
 	stopwaiter.StopWaiter
@@ -336,16 +340,26 @@ func (s *BlocksReExecutor) launchHistoricChunk(ctx context.Context, startBlock, 
 			orcaObserver = orcafeed.NewSweepObserver(s.orcaSink, s.orcaRanges)
 		}
 		log.Info("Starting historic reexecution of blocks", "startBlock", start+1, "endBlock", currentBlock)
+		// statedb는 연속 블록에 걸쳐 재사용한다 — hash 경로의 AdvanceStateByBlock과
+		// 동일 원리 (touch되지 않은 계정은 pinned reader가, 변경분은 in-memory가 답한다).
+		// 블록마다 historic reader를 새로 여는 것이 path 모드의 지배적 비용이었다.
+		var statedb *state.StateDB
 		for n := start + 1; n <= currentBlock; n++ {
 			if ctx.Err() != nil {
 				return
 			}
-			if err := s.reExecuteHistoricBlock(n, orcaObserver); err != nil {
+			// dirty set 누적을 막기 위해 주기적으로 재오픈 (비용은 1/reopenInterval로 상각)
+			if statedb == nil || (n-start-1)%historicReopenInterval == 0 {
+				statedb = nil
+			}
+			next, err := s.reExecuteHistoricBlock(n, statedb, orcaObserver)
+			if err != nil {
 				if ctx.Err() == nil {
 					s.reportFatalErr(fmt.Errorf("blocksReExecutor historic reexecution failed at block %d: %w", n, err))
 				}
 				return
 			}
+			statedb = next
 		}
 		log.Info("Successfully reexecuted historic blocks", "startBlock", start+1, "endBlock", currentBlock)
 		if orcaObserver != nil {
@@ -355,25 +369,29 @@ func (s *BlocksReExecutor) launchHistoricChunk(ctx context.Context, startBlock, 
 	return start
 }
 
-// reExecuteHistoricBlock — 부모 블록의 historic state 위에서 블록 하나를 재실행하고
-// receipts root·gas 정합을 검증한다.
-func (s *BlocksReExecutor) reExecuteHistoricBlock(blockNum uint64, orcaObserver *orcafeed.SweepObserver) error {
+// reExecuteHistoricBlock — 블록 하나를 재실행하고 receipts root·gas 정합을 검증한다.
+// statedb가 nil이 아니면 (직전 블록의 post-state) 재사용하고, nil이면 부모 root에서 연다.
+// 반환값은 다음 블록에 물려줄 post-state.
+func (s *BlocksReExecutor) reExecuteHistoricBlock(blockNum uint64, statedb *state.StateDB, orcaObserver *orcafeed.SweepObserver) (*state.StateDB, error) {
 	block := s.blockchain.GetBlockByNumber(blockNum)
 	if block == nil {
-		return fmt.Errorf("block %d not found", blockNum)
+		return nil, fmt.Errorf("block %d not found", blockNum)
 	}
-	parent := s.blockchain.GetHeader(block.ParentHash(), blockNum-1)
-	if parent == nil {
-		return fmt.Errorf("parent header of block %d not found", blockNum)
-	}
-	// 최근 블록은 live pathdb(diff layer·persistent)에서, 오래된 블록은 state history
-	// freezer(HistoricReader)에서 읽는다.
-	statedb, err := s.blockchain.StateAt(parent.Root)
-	if err != nil {
-		statedb, err = state.New(parent.Root, s.historicDB)
-	}
-	if err != nil {
-		return fmt.Errorf("historic state at block %d (root %v): %w", blockNum-1, parent.Root, err)
+	if statedb == nil {
+		parent := s.blockchain.GetHeader(block.ParentHash(), blockNum-1)
+		if parent == nil {
+			return nil, fmt.Errorf("parent header of block %d not found", blockNum)
+		}
+		// 최근 블록은 live pathdb(diff layer·persistent)에서, 오래된 블록은 state history
+		// freezer(HistoricReader)에서 읽는다.
+		var err error
+		statedb, err = s.blockchain.StateAt(parent.Root)
+		if err != nil {
+			statedb, err = state.New(parent.Root, s.historicDB)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("historic state at block %d (root %v): %w", blockNum-1, parent.Root, err)
+		}
 	}
 	vmConfig := vm.Config{ExposeMultiGas: s.config.ValidateMultiGas}
 	if orcaObserver != nil {
@@ -381,19 +399,19 @@ func (s *BlocksReExecutor) reExecuteHistoricBlock(blockNum uint64, orcaObserver 
 	}
 	result, err := s.blockchain.Processor().Process(block, statedb, vmConfig)
 	if err != nil {
-		return fmt.Errorf("processing block %d: %w", blockNum, err)
+		return nil, fmt.Errorf("processing block %d: %w", blockNum, err)
 	}
 	receipts := result.Receipts
 	if got := types.DeriveSha(receipts, trie.NewStackTrie(nil)); got != block.ReceiptHash() {
-		return fmt.Errorf("receipts root mismatch at block %d: got %v want %v", blockNum, got, block.ReceiptHash())
+		return nil, fmt.Errorf("receipts root mismatch at block %d: got %v want %v", blockNum, got, block.ReceiptHash())
 	}
 	if result.GasUsed != block.GasUsed() {
-		return fmt.Errorf("gas used mismatch at block %d: got %d want %d", blockNum, result.GasUsed, block.GasUsed())
+		return nil, fmt.Errorf("gas used mismatch at block %d: got %d want %d", blockNum, result.GasUsed, block.GasUsed())
 	}
 	if orcaObserver != nil {
 		orcaObserver.OnBlockExecuted(block, receipts, statedb)
 	}
-	return nil
+	return statedb, nil
 }
 
 func (s *BlocksReExecutor) Impl(ctx context.Context, startBlock, currentBlock, minBlocksPerThread uint64) uint64 {

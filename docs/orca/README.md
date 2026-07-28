@@ -5,6 +5,9 @@ feed tx가 실행되는 즉시 enriched receipt(+native transfer 전체)를 로�
 
 ## 실행
 
+주의: 바이너리는 반드시 **`nitro` 이름**으로 설치한다 — nitro는 datadir 하위 경로에
+실행 파일 이름을 쓰므로 다른 이름으로 실행하면 빈 datadir가 새로 만들어진다.
+
 ### Live (follower 노드)
 
 ```bash
@@ -20,7 +23,8 @@ nitro \
 | `--execution.orca-feed.enable` | false | dispatch 활성화 |
 | `--execution.orca-feed.socket-path` | — | unix socket 경로 (필수) |
 | `--execution.orca-feed.mode` | `tx` | `tx`: tx 실행 완료마다 즉시 (blockHash 없음, BlockSeal로 보완) / `block`: 블록 완성 직후 (blockHash 포함). 둘 다 DB commit **전** |
-| `--execution.orca-feed.buffer-size` | 4096 | ring 슬롯 수 — 가득 차면 oldest drop |
+| `--execution.orca-feed.buffer-size` | 4096 | 인코딩 staging ring 슬롯 수 (burst 흡수) |
+| `--execution.orca-feed.buffer-bytes` | 1GiB | **retention log** 바이트 예산 — 컨슈머(feeder) 다운타임 동안 인코딩 프레임을 보관하고 재접속 시 backlog 전체 replay. 예산 초과분은 oldest부터 폐기(seq gap으로 감지) |
 
 ### Sweep (과거 block range 재실행)
 

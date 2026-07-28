@@ -1,6 +1,8 @@
-package orcafeed
+package orcasock
 
 import (
+	"github.com/offchainlabs/nitro/orcafeed"
+
 	"encoding/binary"
 	"io"
 	"net"
@@ -10,7 +12,7 @@ import (
 	"time"
 )
 
-func readFrame(t *testing.T, conn net.Conn) (MsgType, []byte) {
+func readFrame(t *testing.T, conn net.Conn) (orcafeed.MsgType, []byte) {
 	t.Helper()
 	header := make([]byte, 5)
 	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
@@ -23,7 +25,7 @@ func readFrame(t *testing.T, conn net.Conn) (MsgType, []byte) {
 	if _, err := io.ReadFull(conn, payload); err != nil {
 		t.Fatalf("frame payload: %v", err)
 	}
-	return MsgType(header[4]), payload
+	return orcafeed.MsgType(header[4]), payload
 }
 
 func newTestDispatcher(t *testing.T, bufferSize int) (*Dispatcher, string) {
@@ -35,11 +37,11 @@ func newTestDispatcher(t *testing.T, bufferSize int) (*Dispatcher, string) {
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	sock := filepath.Join(dir, "orca.sock")
-	cfg := DefaultConfig
+	cfg := orcafeed.DefaultConfig
 	cfg.Enable = true
 	cfg.SocketPath = sock
 	cfg.BufferSize = bufferSize
-	d, err := NewDispatcher(&cfg, ModeLiveTx)
+	d, err := NewDispatcher(&cfg, orcafeed.ModeLiveTx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,25 +59,25 @@ func TestDispatcherHelloAndRoundtrip(t *testing.T) {
 	defer conn.Close()
 
 	typ, payload := readFrame(t, conn)
-	if typ != MsgHello {
+	if typ != orcafeed.MsgHello {
 		t.Fatalf("첫 프레임이 hello가 아님: %d", typ)
 	}
-	var hello Hello
+	var hello orcafeed.Hello
 	if _, err := hello.UnmarshalMsg(payload); err != nil {
 		t.Fatal(err)
 	}
-	if hello.SchemaVersion != SchemaVersion || hello.Mode != ModeLiveTx {
+	if hello.SchemaVersion != orcafeed.SchemaVersion || hello.Mode != orcafeed.ModeLiveTx {
 		t.Fatalf("hello 불일치: %+v", hello)
 	}
 
-	sent := &ReceiptMsg{BlockNumber: 42, TxIndex: 1, Status: 1}
-	d.Enqueue(MsgReceipt, sent)
+	sent := &orcafeed.ReceiptMsg{BlockNumber: 42, TxIndex: 1, Status: 1}
+	d.Enqueue(orcafeed.MsgReceipt, sent)
 
 	typ, payload = readFrame(t, conn)
-	if typ != MsgReceipt {
+	if typ != orcafeed.MsgReceipt {
 		t.Fatalf("receipt 프레임 아님: %d", typ)
 	}
-	var got ReceiptMsg
+	var got orcafeed.ReceiptMsg
 	if _, err := got.UnmarshalMsg(payload); err != nil {
 		t.Fatal(err)
 	}
@@ -83,13 +85,13 @@ func TestDispatcherHelloAndRoundtrip(t *testing.T) {
 		t.Fatalf("receipt 불일치 (첫 seq는 0): %+v", got)
 	}
 
-	d.Enqueue(MsgBlockSeal, &BlockSealMsg{BlockNumber: 42})
+	d.Enqueue(orcafeed.MsgBlockSeal, &orcafeed.BlockSealMsg{BlockNumber: 42})
 	typ, payload = readFrame(t, conn)
-	var seal BlockSealMsg
+	var seal orcafeed.BlockSealMsg
 	if _, err := seal.UnmarshalMsg(payload); err != nil {
 		t.Fatal(err)
 	}
-	if typ != MsgBlockSeal || seal.Seq != 1 {
+	if typ != orcafeed.MsgBlockSeal || seal.Seq != 1 {
 		t.Fatalf("seq 단조증가 실패: typ=%d seq=%d", typ, seal.Seq)
 	}
 }
@@ -99,7 +101,7 @@ func TestDispatcherEnqueueWithoutClientDoesNotBlock(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < 1000; i++ {
-			d.Enqueue(MsgReceipt, &ReceiptMsg{BlockNumber: uint64(i)})
+			d.Enqueue(orcafeed.MsgReceipt, &orcafeed.ReceiptMsg{BlockNumber: uint64(i)})
 		}
 		close(done)
 	}()

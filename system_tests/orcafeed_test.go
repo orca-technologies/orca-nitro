@@ -144,12 +144,9 @@ func TestOrcaFeedLiveDispatch(t *testing.T) {
 	builder := NewNodeBuilder(ctx).DefaultConfig(t, false).DontParalellise()
 	builder.nodeConfig.Feed.Input = *newBroadcastClientConfigTest(port)
 	builder.takeOwnership = false
-	builder.execConfig.OrcaFeed = orcafeed.Config{
-		Enable:     true,
-		SocketPath: sock,
-		Mode:       "tx",
-		BufferSize: 4096,
-	}
+	builder.execConfig.OrcaFeed = orcafeed.DefaultConfig
+	builder.execConfig.OrcaFeed.Enable = true
+	builder.execConfig.OrcaFeed.SocketPath = sock
 	cleanup := builder.Build(t)
 	defer cleanup()
 	followerClient := builder.L2.Client

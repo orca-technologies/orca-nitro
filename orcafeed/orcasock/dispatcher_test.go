@@ -28,15 +28,20 @@ func readFrame(t *testing.T, conn net.Conn) (orcafeed.MsgType, []byte) {
 	return orcafeed.MsgType(header[4]), payload
 }
 
-func newTestDispatcher(t *testing.T, bufferSize int) (*Dispatcher, string) {
+// t.TempDir()는 테스트명이 들어가 macOS unix socket 경로 한계(104B)를 넘는다
+func mustTempDir(t *testing.T) string {
 	t.Helper()
-	// t.TempDir()는 테스트명이 들어가 macOS unix socket 경로 한계(104B)를 넘는다
 	dir, err := os.MkdirTemp("", "orca")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	sock := filepath.Join(dir, "orca.sock")
+	return dir
+}
+
+func newTestDispatcher(t *testing.T, bufferSize int) (*Dispatcher, string) {
+	t.Helper()
+	sock := filepath.Join(mustTempDir(t), "orca.sock")
 	cfg := orcafeed.DefaultConfig
 	cfg.Enable = true
 	cfg.SocketPath = sock
@@ -137,5 +142,109 @@ func TestRingDropOldest(t *testing.T) {
 	}
 	if r.dropped != 2 {
 		t.Fatalf("drop 카운터: got %d want 2", r.dropped)
+	}
+}
+
+// 컨슈머 다운타임 동안 보관 → 재접속 시 backlog 전체 replay
+func TestDispatcherRetentionReplay(t *testing.T) {
+	d, sock := newTestDispatcher(t, 4096)
+
+	for i := 0; i < 100; i++ {
+		d.Enqueue(orcafeed.MsgReceipt, &orcafeed.ReceiptMsg{BlockNumber: uint64(i)})
+	}
+	time.Sleep(200 * time.Millisecond) // writer가 staging → retention 옮길 시간
+
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	typ, _ := readFrame(t, conn)
+	if typ != orcafeed.MsgHello {
+		t.Fatalf("hello 먼저: %d", typ)
+	}
+	for i := 0; i < 100; i++ {
+		typ, payload := readFrame(t, conn)
+		if typ != orcafeed.MsgReceipt {
+			t.Fatalf("receipt 아님: %d", typ)
+		}
+		var m orcafeed.ReceiptMsg
+		if _, err := m.UnmarshalMsg(payload); err != nil {
+			t.Fatal(err)
+		}
+		if m.Seq != uint64(i) || m.BlockNumber != uint64(i) {
+			t.Fatalf("replay 순서/내용 불일치: seq=%d blk=%d want %d", m.Seq, m.BlockNumber, i)
+		}
+	}
+
+	// 이후 live 이어붙임
+	d.Enqueue(orcafeed.MsgReceipt, &orcafeed.ReceiptMsg{BlockNumber: 100})
+	_, payload := readFrame(t, conn)
+	var m orcafeed.ReceiptMsg
+	if _, err := m.UnmarshalMsg(payload); err != nil {
+		t.Fatal(err)
+	}
+	if m.Seq != 100 {
+		t.Fatalf("live 이어붙임 실패: %+v", m)
+	}
+}
+
+// 바이트 예산 초과 시 oldest 제거 → 재접속 클라이언트는 seq gap으로 감지
+func TestDispatcherByteBudgetEviction(t *testing.T) {
+	sock := filepath.Join(mustTempDir(t), "orca.sock")
+	cfg := orcafeed.DefaultConfig
+	cfg.Enable = true
+	cfg.SocketPath = sock
+	cfg.BufferSize = 4096
+	cfg.BufferBytes = 4096 // 아주 작은 예산 — 대부분 evict
+	d, err := NewDispatcher(&cfg, orcafeed.ModeLiveTx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+
+	payload := make([]byte, 200)
+	for i := 0; i < 200; i++ {
+		d.Enqueue(orcafeed.MsgReceipt, &orcafeed.ReceiptMsg{BlockNumber: uint64(i), Calldata: payload})
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	typ, _ := readFrame(t, conn)
+	if typ != orcafeed.MsgHello {
+		t.Fatalf("hello 먼저: %d", typ)
+	}
+	_, p := readFrame(t, conn)
+	var first orcafeed.ReceiptMsg
+	if _, err := first.UnmarshalMsg(p); err != nil {
+		t.Fatal(err)
+	}
+	if first.Seq == 0 {
+		t.Fatal("예산 초과인데 oldest가 남아있음 (evict 실패)")
+	}
+	// 남은 프레임 전부 소진 — 마지막이 199여야 함
+	last := first
+	for {
+		if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		header := make([]byte, 5)
+		if _, err := io.ReadFull(conn, header); err != nil {
+			break // timeout = 소진
+		}
+		pl := make([]byte, binary.LittleEndian.Uint32(header[:4]))
+		if _, err := io.ReadFull(conn, pl); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := last.UnmarshalMsg(pl); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if last.Seq != 199 {
+		t.Fatalf("최신이 보존돼야 함: last seq=%d", last.Seq)
 	}
 }

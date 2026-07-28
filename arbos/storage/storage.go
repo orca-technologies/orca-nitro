@@ -55,7 +55,7 @@ type Storage struct {
 	db         vm.StateDB
 	storageKey []byte
 	burner     burn.Burner
-	hashCache  *lru.Cache[string, []byte]
+	hashCache  *shardedHashCache
 }
 
 const StorageReadCost = params.SloadGasEIP2200
@@ -64,8 +64,42 @@ const StorageWriteZeroCost = params.SstoreResetGasEIP2200
 const StorageCodeHashCost = params.ColdAccountAccessCostEIP2929
 
 const storageKeyCacheSize = 1024
+const hashCacheShards = 64
 
-var storageHashCache = lru.NewCache[string, []byte](storageKeyCacheSize)
+// shardedHashCache — 병렬 블록 재실행(blocks_reexecutor)에서 전역 단일 LRU 뮤텍스가
+// 병목이라 샤딩한다 (44 워커가 storage 키 해시마다 한 락에 직렬화되는 것을 pprof로
+// 확인). 단일 스레드 경로 추가 비용은 shard 선택 해시 몇 ns뿐.
+type shardedHashCache struct {
+	shards [hashCacheShards]*lru.Cache[string, []byte]
+}
+
+func newShardedHashCache(sizePerShard int) *shardedHashCache {
+	c := &shardedHashCache{shards: [hashCacheShards]*lru.Cache[string, []byte]{}}
+	for i := range c.shards {
+		c.shards[i] = lru.NewCache[string, []byte](sizePerShard)
+	}
+	return c
+}
+
+// fnv-1a over 마지막 8바이트 — storage 키는 접미부 변별력이 가장 크다
+func (c *shardedHashCache) shard(key string) *lru.Cache[string, []byte] {
+	var h uint32 = 2166136261
+	start := 0
+	if len(key) > 8 {
+		start = len(key) - 8
+	}
+	for i := start; i < len(key); i++ {
+		h = (h ^ uint32(key[i])) * 16777619
+	}
+	return c.shards[h%hashCacheShards]
+}
+
+func (c *shardedHashCache) Get(key string) ([]byte, bool) { return c.shard(key).Get(key) }
+func (c *shardedHashCache) Add(key string, value []byte) bool {
+	return c.shard(key).Add(key, value)
+}
+
+var storageHashCache = newShardedHashCache(storageKeyCacheSize)
 var cacheFullLogged atomic.Bool
 
 // KVStorage uses a Geth database to create an evm key-value store for an arbitrary account.

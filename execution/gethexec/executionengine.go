@@ -56,6 +56,7 @@ import (
 	"github.com/offchainlabs/nitro/execution"
 	"github.com/offchainlabs/nitro/execution/gethexec/addressfilter"
 	"github.com/offchainlabs/nitro/execution/gethexec/eventfilter"
+	"github.com/offchainlabs/nitro/orcafeed"
 	"github.com/offchainlabs/nitro/transactionfeed"
 	"github.com/offchainlabs/nitro/util/arbmath"
 	"github.com/offchainlabs/nitro/util/containers"
@@ -342,6 +343,14 @@ type ExecutionEngine struct {
 	waitingForFilteredTx           *FilteredTxWaitState
 
 	transactionBroadcaster transactionBroadcaster
+
+	// orca receipt dispatch — nil이면 완전 무변경 경로 (createBlocksMutex 하에서만 사용)
+	orcaObserver *orcafeed.BlockObserver
+}
+
+// SetOrcaObserver — 노드 초기화 시 1회 주입 (Start 이전).
+func (s *ExecutionEngine) SetOrcaObserver(o *orcafeed.BlockObserver) {
+	s.orcaObserver = o
 }
 
 func NewL1PriceData() *L1PriceData {
@@ -852,6 +861,7 @@ func (s *ExecutionEngine) sequenceTransactionsWithBlockMutex(header *arbostypes.
 		session.runCtx,
 		s.exposeMultiGas,
 		s.addressChecker,
+		nil, // sequencer 경로 — follower dispatch 없음
 	)
 	if err != nil {
 		return nil, nil, err
@@ -1194,6 +1204,11 @@ func (s *ExecutionEngine) createBlockFromNextMessage(msg *arbostypes.MessageWith
 	}
 	statedb.StartPrefetcher("TransactionStreamer", witness)
 	defer statedb.StopPrefetcher()
+	// prefetch 실행(캐시 워밍용 중복 실행)은 dispatch 금지
+	observer := s.orcaObserver
+	if isMsgForPrefetch {
+		observer = nil
+	}
 
 	// For delayed message sequencing, we use DelayedFilteringSequencingHooks which can
 	// halt on filtered addresses. This duplicates logic from arbos.ProduceBlock but with
@@ -1224,6 +1239,7 @@ func (s *ExecutionEngine) createBlockFromNextMessage(msg *arbostypes.MessageWith
 			runCtx,
 			s.exposeMultiGas,
 			s.addressChecker,
+			observer,
 		)
 		if err != nil {
 			return nil, nil, nil, err
@@ -1274,6 +1290,7 @@ func (s *ExecutionEngine) createBlockFromNextMessage(msg *arbostypes.MessageWith
 		isMsgForPrefetch,
 		runCtx,
 		s.exposeMultiGas,
+		observer,
 	)
 	if err != nil {
 		return nil, nil, nil, err
@@ -1575,6 +1592,10 @@ func (s *ExecutionEngine) digestMessageWithBlockMutex(msgIdxToDigest arbutil.Mes
 
 	err = s.appendBlock(block, statedb, receipts, blockCalcTime)
 	if err != nil {
+		// commit 전 dispatch된 receipt들의 무효화 통지 (극히 드묾 — 디스크 오류 등)
+		if s.orcaObserver != nil {
+			s.orcaObserver.OnAppendFailed(block.NumberU64())
+		}
 		return nil, err
 	}
 	s.cacheL1PriceDataOfMsg(msgIdxToDigest, block, false)

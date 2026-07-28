@@ -126,7 +126,7 @@ func TestAdvanceStateUpToBlockCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := s.advanceStateUpToBlock(ctx, nil, targetHeader, lastAvailableHeader, release)
+	err := s.advanceStateUpToBlock(ctx, nil, targetHeader, lastAvailableHeader, release, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestAdvanceStateUpToBlockRecoversPanic(t *testing.T) {
 	released := false
 	release := func() { released = true }
 
-	err := s.advanceStateUpToBlock(context.Background(), nil, targetHeader, lastAvailableHeader, release)
+	err := s.advanceStateUpToBlock(context.Background(), nil, targetHeader, lastAvailableHeader, release, nil)
 	if err == nil {
 		t.Fatal("expected error from panic recovery, got nil")
 	}

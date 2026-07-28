@@ -65,7 +65,6 @@ type ReceiptMsg struct {
 	BlockHash         [32]byte // tx 모드: zero (BlockSealMsg로 보완), block/sweep 모드: 채움
 	TxIndex           uint32
 	L2Timestamp       uint64
-	TxHash            [32]byte
 	TxType            uint8
 	From              [20]byte
 	To                [20]byte // contract creation: zero

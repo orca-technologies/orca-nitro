@@ -26,11 +26,17 @@ import (
 	"github.com/offchainlabs/nitro/util/testhelpers"
 )
 
+// receiptKey — wire identity `(block_number, tx_index)`.
+type receiptKey struct {
+	blockNumber uint64
+	txIndex     uint32
+}
+
 // orcaMsgStore — 소켓/sink에서 수신한 메시지 집합 (goroutine-safe)
 type orcaMsgStore struct {
 	mu       sync.Mutex
 	hello    *orcafeed.Hello
-	receipts map[common.Hash]*orcafeed.ReceiptMsg
+	receipts map[receiptKey]*orcafeed.ReceiptMsg
 	seals    map[uint64]*orcafeed.BlockSealMsg
 	ranges   []*orcafeed.RangeDoneMsg
 	seqs     []uint64
@@ -40,7 +46,7 @@ func newOrcaMsgStore() *orcaMsgStore {
 	return &orcaMsgStore{
 		mu:       sync.Mutex{},
 		hello:    nil,
-		receipts: make(map[common.Hash]*orcafeed.ReceiptMsg),
+		receipts: make(map[receiptKey]*orcafeed.ReceiptMsg),
 		seals:    make(map[uint64]*orcafeed.BlockSealMsg),
 		ranges:   nil,
 		seqs:     nil,
@@ -52,7 +58,7 @@ func (s *orcaMsgStore) Enqueue(typ orcafeed.MsgType, msg orcafeed.SeqSetter) {
 	defer s.mu.Unlock()
 	switch m := msg.(type) {
 	case *orcafeed.ReceiptMsg:
-		s.receipts[common.Hash(m.TxHash)] = m
+		s.receipts[receiptKey{m.BlockNumber, m.TxIndex}] = m
 	case *orcafeed.BlockSealMsg:
 		s.seals[m.BlockNumber] = m
 	case *orcafeed.RangeDoneMsg:
@@ -60,22 +66,22 @@ func (s *orcaMsgStore) Enqueue(typ orcafeed.MsgType, msg orcafeed.SeqSetter) {
 	}
 }
 
-func (s *orcaMsgStore) receipt(txHash common.Hash) *orcafeed.ReceiptMsg {
+func (s *orcaMsgStore) receipt(blockNumber uint64, txIndex uint32) *orcafeed.ReceiptMsg {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.receipts[txHash]
+	return s.receipts[receiptKey{blockNumber, txIndex}]
 }
 
-func (s *orcaMsgStore) waitReceipt(t *testing.T, txHash common.Hash) *orcafeed.ReceiptMsg {
+func (s *orcaMsgStore) waitReceipt(t *testing.T, blockNumber uint64, txIndex uint32) *orcafeed.ReceiptMsg {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		if msg := s.receipt(txHash); msg != nil {
+		if msg := s.receipt(blockNumber, txIndex); msg != nil {
 			return msg
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	Fatal(t, "orcafeed receipt 미수신: ", txHash)
+	Fatal(t, "orcafeed receipt 미수신: block=", blockNumber, " txIndex=", txIndex)
 	return nil
 }
 
@@ -100,7 +106,7 @@ func (s *orcaMsgStore) readSocket(t *testing.T, conn net.Conn) {
 		case orcafeed.MsgReceipt:
 			var m orcafeed.ReceiptMsg
 			if _, err := m.UnmarshalMsg(payload); err == nil {
-				s.receipts[common.Hash(m.TxHash)] = &m
+				s.receipts[receiptKey{m.BlockNumber, m.TxIndex}] = &m
 				s.seqs = append(s.seqs, m.Seq)
 			}
 		case orcafeed.MsgBlockSeal:
@@ -182,7 +188,7 @@ func TestOrcaFeedLiveDispatch(t *testing.T) {
 	transferValue := big.NewInt(1e12)
 	tx1 := seqInfo.PrepareTx("Owner", "User2", seqInfo.TransferGas, transferValue, nil)
 	Require(t, seqClient.SendTransaction(ctx, tx1))
-	_, err = EnsureTxSucceeded(ctx, seqClient, tx1)
+	receipt1, err := EnsureTxSucceeded(ctx, seqClient, tx1)
 	Require(t, err)
 
 	// (2) MultiCallTest 배포 → (3) internal transfer 유발
@@ -197,7 +203,7 @@ func TestOrcaFeedLiveDispatch(t *testing.T) {
 	callData := argsForMulticallEmit(user2, innerValue, nil)
 	tx3 := seqInfo.PrepareTxTo("Owner", &multiAddr, 1e9, outerValue, callData)
 	Require(t, seqClient.SendTransaction(ctx, tx3))
-	_, err = EnsureTxSucceeded(ctx, seqClient, tx3)
+	receipt3, err := EnsureTxSucceeded(ctx, seqClient, tx3)
 	Require(t, err)
 
 	// follower가 feed로 따라올 때까지 대기
@@ -213,7 +219,7 @@ func TestOrcaFeedLiveDispatch(t *testing.T) {
 	}
 
 	// (1) 검증: tx 필드 + depth-0 transfer + post balance
-	msg1 := store.waitReceipt(t, tx1.Hash())
+	msg1 := store.waitReceipt(t, receipt1.BlockNumber.Uint64(), uint32(receipt1.TransactionIndex))
 	if common.Address(msg1.To) != user2 || msg1.Status != 1 || msg1.ToIsContract {
 		Fatal(t, "tx1 필드 불일치: ", msg1)
 	}
@@ -245,7 +251,7 @@ func TestOrcaFeedLiveDispatch(t *testing.T) {
 	}
 
 	// (3) 검증: internal transfer (depth>=1) + ToIsContract
-	msg3 := store.waitReceipt(t, tx3.Hash())
+	msg3 := store.waitReceipt(t, receipt3.BlockNumber.Uint64(), uint32(receipt3.TransactionIndex))
 	if !msg3.ToIsContract || common.Address(msg3.To) != multiAddr {
 		Fatal(t, "tx3 contract 플래그 불일치: ", msg3)
 	}
@@ -343,7 +349,7 @@ func testOrcaFeedSweep(t *testing.T, scheme string) {
 	// 블록 몇 개 생성: 단순 transfer + internal transfer
 	tx1 := l2info.PrepareTx("Owner", "User2", l2info.TransferGas, big.NewInt(1e12), nil)
 	Require(t, client.SendTransaction(ctx, tx1))
-	_, err := EnsureTxSucceeded(ctx, client, tx1)
+	receipt1, err := EnsureTxSucceeded(ctx, client, tx1)
 	Require(t, err)
 
 	auth := l2info.GetDefaultTransactOpts("Owner", ctx)
@@ -376,7 +382,7 @@ func testOrcaFeedSweep(t *testing.T, scheme string) {
 	Require(t, executor.WaitForReExecution(ctx))
 
 	// live와 동일 스키마 + blockHash 채워짐
-	msg1 := store.receipt(tx1.Hash())
+	msg1 := store.receipt(receipt1.BlockNumber.Uint64(), uint32(receipt1.TransactionIndex))
 	if msg1 == nil || msg1.BlockHash == ([32]byte{}) {
 		Fatal(t, "sweep tx1 receipt 불일치: ", msg1)
 	}
@@ -384,7 +390,7 @@ func testOrcaFeedSweep(t *testing.T, scheme string) {
 		Fatal(t, "sweep tx1 필드 불일치: ", msg1)
 	}
 
-	msg3 := store.receipt(tx3.Hash())
+	msg3 := store.receipt(receipt3.BlockNumber.Uint64(), uint32(receipt3.TransactionIndex))
 	if msg3 == nil || msg3.BlockNumber != receipt3.BlockNumber.Uint64() || !msg3.ToIsContract {
 		Fatal(t, "sweep tx3 불일치: ", msg3)
 	}

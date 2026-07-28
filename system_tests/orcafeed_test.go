@@ -257,12 +257,27 @@ func TestOrcaFeedLiveDispatch(t *testing.T) {
 	}
 }
 
+// hash 스킴: state 전진(advanceStateUpToBlock) 경로
 func TestOrcaFeedSweep(t *testing.T) {
+	testOrcaFeedSweep(t, rawdb.HashScheme)
+}
+
+// path archive 스킴 (Titan 프로필): HistoricReader 블록별 직접 실행 경로
+func TestOrcaFeedSweepPathArchive(t *testing.T) {
+	testOrcaFeedSweep(t, rawdb.PathScheme)
+}
+
+func testOrcaFeedSweep(t *testing.T, scheme string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	builder := NewNodeBuilder(ctx).DefaultConfig(t, false)
-	builder.RequireScheme(t, rawdb.HashScheme) // blocks_reexecutor는 hash 전용
+	builder.RequireScheme(t, scheme)
+	if scheme == rawdb.PathScheme {
+		// Titan archive 노드 구성과 동일: path + archive (state history 전체 보존)
+		builder.execConfig.Caching.Archive = true
+		builder.execConfig.Caching.StateHistory = 0
+	}
 	cleanup := builder.Build(t)
 	defer cleanup()
 

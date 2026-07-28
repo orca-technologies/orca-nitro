@@ -25,6 +25,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/triedb"
 	"github.com/ethereum/go-ethereum/triedb/hashdb"
 
@@ -125,6 +126,11 @@ type BlocksReExecutor struct {
 	// orca sweep dispatch (옵션). sink는 worker 간 공유, observer는 worker별 생성.
 	orcaSink   orcafeed.Sink
 	orcaRanges [][2]uint64 // dispatch 대상 원본 범위 (pre-state용 start-- 이전 값)
+
+	// path 스킴 archive (Titan 등): HistoricReader로 블록별 과거 state를 직접 열어
+	// 실행한다 — hash 모드의 state 전진(FindLastAvailableState)이 불필요.
+	pathMode   bool
+	historicDB state.Database
 }
 
 // SetOrcaSink — Start 이전 1회 주입. 설정 시 재실행 블록의 receipt·transfer를 dispatch한다.
@@ -133,9 +139,7 @@ func (s *BlocksReExecutor) SetOrcaSink(sink orcafeed.Sink) {
 }
 
 func New(c *Config, blockchain *core.BlockChain, ethDb ethdb.Database) (*BlocksReExecutor, error) {
-	if blockchain.TrieDB().Scheme() == rawdb.PathScheme {
-		return nil, errors.New("blocksReExecutor not supported on pathdb")
-	}
+	pathMode := blockchain.TrieDB().Scheme() == rawdb.PathScheme
 	chainStart := blockchain.Config().ArbitrumChainParams.GenesisBlockNum
 	chainEnd := blockchain.CurrentBlock().Number.Uint64()
 	minBlocksPerThread := uint64(10000)
@@ -191,30 +195,39 @@ func New(c *Config, blockchain *core.BlockChain, ethDb ethdb.Database) (*BlocksR
 	sort.Slice(blocks, func(i, j int) bool {
 		return blocks[i][1] > blocks[j][1]
 	})
-	hashConfig := *hashdb.Defaults
-	hashConfig.CleanCacheSize = c.TrieCleanLimit * 1024 * 1024
-	trieConfig := triedb.Config{
-		Preimages: false,
-		HashDB:    &hashConfig,
-	}
-
 	var blocksReExecutor *BlocksReExecutor
+	var stateDatabase state.Database
+	var historicDB state.Database
+	var stateForFunc arbitrum.StateForHeaderFunction
 
-	stateForFunc := func(header *types.Header) (*state.StateDB, arbitrum.StateReleaseFunc, error) {
-		blocksReExecutor.mutex.Lock()
-		defer blocksReExecutor.mutex.Unlock()
-		sdb, err := state.New(header.Root, blocksReExecutor.db)
-		if err == nil {
-			_ = blocksReExecutor.db.TrieDB().Reference(header.Root, common.Hash{}) // Will be dereferenced later in advanceStateUpToBlock
-			return sdb, func() { blocksReExecutor.dereferenceRoot(header.Root) }, nil
+	if pathMode {
+		// path archive: 과거 state는 state history freezer에서 직접 읽는다.
+		// (EnableStateIndexing은 archive 모드에서 켜짐 — core/blockchain.go)
+		historicDB = state.NewHistoricDatabase(ethDb, blockchain.TrieDB())
+	} else {
+		hashConfig := *hashdb.Defaults
+		hashConfig.CleanCacheSize = c.TrieCleanLimit * 1024 * 1024
+		trieConfig := triedb.Config{
+			Preimages: false,
+			HashDB:    &hashConfig,
 		}
-		return sdb, arbitrum.NoopStateRelease, err
+		stateDatabase = state.NewDatabase(triedb.NewDatabase(ethDb, &trieConfig), nil)
+		stateForFunc = func(header *types.Header) (*state.StateDB, arbitrum.StateReleaseFunc, error) {
+			blocksReExecutor.mutex.Lock()
+			defer blocksReExecutor.mutex.Unlock()
+			sdb, err := state.New(header.Root, blocksReExecutor.db)
+			if err == nil {
+				_ = blocksReExecutor.db.TrieDB().Reference(header.Root, common.Hash{}) // Will be dereferenced later in advanceStateUpToBlock
+				return sdb, func() { blocksReExecutor.dereferenceRoot(header.Root) }, nil
+			}
+			return sdb, arbitrum.NoopStateRelease, err
+		}
 	}
 
 	blocksReExecutor = &BlocksReExecutor{
 		StopWaiter:    stopwaiter.StopWaiter{},
 		config:        c,
-		db:            state.NewDatabase(triedb.NewDatabase(ethDb, &trieConfig), nil),
+		db:            stateDatabase,
 		blockchain:    blockchain,
 		stateFor:      stateForFunc,
 		blocks:        blocks,
@@ -225,6 +238,8 @@ func New(c *Config, blockchain *core.BlockChain, ethDb ethdb.Database) (*BlocksR
 		mutex:         sync.Mutex{},
 		orcaSink:      nil,
 		orcaRanges:    orcaRanges,
+		pathMode:      pathMode,
+		historicDB:    historicDB,
 	}
 	return blocksReExecutor, nil
 }
@@ -255,6 +270,9 @@ func (s *BlocksReExecutor) reportFatalErr(err error) {
 // use as the next upper bound. Every call produces exactly one send on s.done, regardless
 // of whether a goroutine is launched or an early error occurs.
 func (s *BlocksReExecutor) LaunchBlocksReExecution(ctx context.Context, startBlock, currentBlock, minBlocksPerThread uint64) uint64 {
+	if s.pathMode {
+		return s.launchHistoricChunk(ctx, startBlock, currentBlock, minBlocksPerThread)
+	}
 	launched := false
 	defer func() {
 		if !launched {
@@ -302,6 +320,80 @@ func (s *BlocksReExecutor) LaunchBlocksReExecution(ctx context.Context, startBlo
 		}
 	})
 	return start
+}
+
+// launchHistoricChunk — path archive용 chunk worker. (start, currentBlock] 블록들을
+// HistoricReader 기반 state로 각각 독립 실행한다 (state 전진·release 관리 불필요).
+func (s *BlocksReExecutor) launchHistoricChunk(ctx context.Context, startBlock, currentBlock, minBlocksPerThread uint64) uint64 {
+	start := arbmath.SaturatingUSub(currentBlock, minBlocksPerThread)
+	if start < startBlock {
+		start = startBlock
+	}
+	s.LaunchThread(func(ctx context.Context) {
+		defer func() { s.done <- struct{}{} }()
+		var orcaObserver *orcafeed.SweepObserver
+		if s.orcaSink != nil {
+			orcaObserver = orcafeed.NewSweepObserver(s.orcaSink, s.orcaRanges)
+		}
+		log.Info("Starting historic reexecution of blocks", "startBlock", start+1, "endBlock", currentBlock)
+		for n := start + 1; n <= currentBlock; n++ {
+			if ctx.Err() != nil {
+				return
+			}
+			if err := s.reExecuteHistoricBlock(n, orcaObserver); err != nil {
+				if ctx.Err() == nil {
+					s.reportFatalErr(fmt.Errorf("blocksReExecutor historic reexecution failed at block %d: %w", n, err))
+				}
+				return
+			}
+		}
+		log.Info("Successfully reexecuted historic blocks", "startBlock", start+1, "endBlock", currentBlock)
+		if orcaObserver != nil {
+			orcaObserver.OnRangeDone(start+1, currentBlock)
+		}
+	})
+	return start
+}
+
+// reExecuteHistoricBlock — 부모 블록의 historic state 위에서 블록 하나를 재실행하고
+// receipts root·gas 정합을 검증한다.
+func (s *BlocksReExecutor) reExecuteHistoricBlock(blockNum uint64, orcaObserver *orcafeed.SweepObserver) error {
+	block := s.blockchain.GetBlockByNumber(blockNum)
+	if block == nil {
+		return fmt.Errorf("block %d not found", blockNum)
+	}
+	parent := s.blockchain.GetHeader(block.ParentHash(), blockNum-1)
+	if parent == nil {
+		return fmt.Errorf("parent header of block %d not found", blockNum)
+	}
+	// 최근 블록은 live pathdb(diff layer·persistent)에서, 오래된 블록은 state history
+	// freezer(HistoricReader)에서 읽는다.
+	statedb, err := s.blockchain.StateAt(parent.Root)
+	if err != nil {
+		statedb, err = state.New(parent.Root, s.historicDB)
+	}
+	if err != nil {
+		return fmt.Errorf("historic state at block %d (root %v): %w", blockNum-1, parent.Root, err)
+	}
+	vmConfig := vm.Config{ExposeMultiGas: s.config.ValidateMultiGas}
+	if orcaObserver != nil {
+		vmConfig.Tracer = orcaObserver.Hooks()
+	}
+	result, err := s.blockchain.Processor().Process(block, statedb, vmConfig)
+	if err != nil {
+		return fmt.Errorf("processing block %d: %w", blockNum, err)
+	}
+	receipts := result.Receipts
+	if got := types.DeriveSha(receipts, trie.NewStackTrie(nil)); got != block.ReceiptHash() {
+		return fmt.Errorf("receipts root mismatch at block %d: got %v want %v", blockNum, got, block.ReceiptHash())
+	}
+	if result.GasUsed != block.GasUsed() {
+		return fmt.Errorf("gas used mismatch at block %d: got %d want %d", blockNum, result.GasUsed, block.GasUsed())
+	}
+	if orcaObserver != nil {
+		orcaObserver.OnBlockExecuted(block, receipts, statedb)
+	}
+	return nil
 }
 
 func (s *BlocksReExecutor) Impl(ctx context.Context, startBlock, currentBlock, minBlocksPerThread uint64) uint64 {

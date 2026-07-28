@@ -44,6 +44,9 @@ type TransferRecord struct {
 	PostBalanceTo   []byte   // transfer 직후 to 잔액. nil = 미상
 	Depth           uint16   // 0 = top-level
 	Reverted        bool     // revert된 subtree 내 transfer
+	// tx 안에서 이 이벤트가 방출된 순번 (0부터, 로그와 공유하는 단일 시퀀스).
+	// 체인이 매긴 번호가 아니라 우리가 실행 중 관측한 순서다.
+	InnerIndex uint16
 }
 
 //msgp:tuple LogRecord
@@ -51,6 +54,8 @@ type LogRecord struct {
 	Address [20]byte
 	Topics  [][32]byte
 	Data    []byte
+	// TransferRecord.InnerIndex와 같은 시퀀스 — 로그와 transfer의 실제 interleave.
+	InnerIndex uint16
 }
 
 //msgp:tuple ReceiptMsg

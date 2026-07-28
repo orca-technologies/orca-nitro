@@ -38,6 +38,8 @@ import (
 	"github.com/offchainlabs/nitro/execution/gethexec/eventfilter"
 	executionrpcserver "github.com/offchainlabs/nitro/execution/rpcserver"
 	"github.com/offchainlabs/nitro/gethhook"
+	"github.com/offchainlabs/nitro/orcafeed"
+	"github.com/offchainlabs/nitro/orcafeed/orcasock"
 	"github.com/offchainlabs/nitro/solgen/go/precompilesgen"
 	"github.com/offchainlabs/nitro/timeboost"
 	"github.com/offchainlabs/nitro/util"
@@ -210,6 +212,7 @@ type Config struct {
 	BlockMetadataApiCacheSize   uint64                     `koanf:"block-metadata-api-cache-size"`
 	BlockMetadataApiBlocksLimit uint64                     `koanf:"block-metadata-api-blocks-limit"`
 	VmTrace                     LiveTracingConfig          `koanf:"vmtrace"`
+	OrcaFeed                    orcafeed.Config            `koanf:"orca-feed"`
 	ExposeMultiGas              bool                       `koanf:"expose-multi-gas"`
 	RPCServer                   rpcserver.Config           `koanf:"rpc-server"`
 	ConsensusRPCClient          rpcclient.ClientConfig     `koanf:"consensus-rpc-client" reload:"hot"`
@@ -273,6 +276,7 @@ func ConfigAddOptions(prefix string, f *pflag.FlagSet) {
 	f.Bool(prefix+".disable-arbowner-ethcall", ConfigDefault.DisableArbOwnerEthCall, "disable ArbOwner precompile calls outside on-chain execution (ethcall, gas estimation)")
 	f.Uint64(prefix+".legacy-zero-base-fee-until", ConfigDefault.LegacyZeroBaseFeeUntil, "orbit-chain compat: re-enables the pre-v3.7 behavior of treating ArbOS<=40 blocks with zero base fee as non-arbitrum, for blocks with unix timestamp strictly less than this value (0 disables; set to a timestamp past the last zero-basefee block on the chain)")
 	LiveTracingConfigAddOptions(prefix+".vmtrace", f)
+	orcafeed.ConfigAddOptions(prefix+".orca-feed", f)
 	rpcserver.ConfigAddOptions(prefix+".rpc-server", "execution", f)
 	rpcclient.RPCClientAddOptions(prefix+".consensus-rpc-client", f, &ConfigDefault.ConsensusRPCClient)
 }
@@ -311,6 +315,7 @@ var ConfigDefault = Config{
 	BlockMetadataApiCacheSize:   100 * 1024 * 1024,
 	BlockMetadataApiBlocksLimit: 100,
 	VmTrace:                     DefaultLiveTracingConfig,
+	OrcaFeed:                    orcafeed.DefaultConfig,
 	ExposeMultiGas:              false,
 	DisableArbOwnerEthCall:      false,
 	LegacyZeroBaseFeeUntil:      0,
@@ -352,6 +357,7 @@ type ExecutionNode struct {
 	filteringReportRPCClient *FilteringReportRPCClient
 	AddressFilterService     *addressfilter.FilterService
 	EventFilter              *eventfilter.EventFilter
+	OrcaDispatcher           *orcasock.Dispatcher
 }
 
 func CreateExecutionNode(
@@ -392,6 +398,19 @@ func CreateExecutionNode(
 	}
 
 	execEngine := NewExecutionEngine(l2BlockChain, syncTillBlock, config.ExposeMultiGas, config.TransactionFiltering.DisableDelayedSequencingFilter, addressChecker, filteringReportRPCClient)
+	var orcaDispatcher *orcasock.Dispatcher
+	if config.OrcaFeed.Enable {
+		mode := orcafeed.ModeLiveTx
+		if config.OrcaFeed.Mode == "block" {
+			mode = orcafeed.ModeLiveBlock
+		}
+		orcaDispatcher, err = orcasock.NewDispatcher(&config.OrcaFeed, mode)
+		if err != nil {
+			return nil, fmt.Errorf("orca-feed dispatcher: %w", err)
+		}
+		execEngine.SetOrcaObserver(orcafeed.NewBlockObserver(orcaDispatcher, config.OrcaFeed.Mode))
+		log.Info("orca-feed dispatch enabled", "socket", config.OrcaFeed.SocketPath, "mode", config.OrcaFeed.Mode)
+	}
 	if config.EnablePrefetchBlock {
 		execEngine.EnablePrefetchBlock()
 	}
@@ -506,6 +525,7 @@ func CreateExecutionNode(
 		filteringReportRPCClient: filteringReportRPCClient,
 		AddressFilterService:     addressFilterService,
 		EventFilter:              eventFilter,
+		OrcaDispatcher:           orcaDispatcher,
 	}
 
 	if config.ConsensusRPCClient.URL != "" {
@@ -682,6 +702,9 @@ func (n *ExecutionNode) StopAndWait() {
 	}
 	if n.ExecEngine.Started() {
 		n.ExecEngine.StopAndWait()
+	}
+	if n.OrcaDispatcher != nil {
+		n.OrcaDispatcher.Close()
 	}
 	if n.consensusRPCClient != nil {
 		n.consensusRPCClient.StopAndWait()

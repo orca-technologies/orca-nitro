@@ -24,7 +24,8 @@ nitro \
 
 ### Sweep (과거 block range 재실행)
 
-titan archive 스냅샷(hash 스킴) 복원 노드에서:
+titan archive 스냅샷(path 스킴 + archive — `--execution.caching.state-scheme=path`
+`--execution.caching.archive`) 복원 노드에서:
 
 ```bash
 nitro \

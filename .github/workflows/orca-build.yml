@@ -55,10 +55,9 @@ jobs:
         run: command -v cbindgen || cargo install --force cbindgen --version ${{ env.CBINDGEN_VERSION }}
 
       - name: foundry
-        run: |
-          curl -L https://foundry.paradigm.xyz | bash
-          "$HOME/.foundry/bin/foundryup" -i ${{ env.FOUNDRY_VERSION }}
-          echo "$HOME/.foundry/bin" >> "$GITHUB_PATH"
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v${{ env.FOUNDRY_VERSION }}
 
       - name: emsdk
         run: |

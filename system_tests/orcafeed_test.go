@@ -22,6 +22,7 @@ import (
 	blocksreexecutor "github.com/offchainlabs/nitro/blocks_reexecutor"
 	"github.com/offchainlabs/nitro/orcafeed"
 	"github.com/offchainlabs/nitro/solgen/go/localgen"
+	"github.com/offchainlabs/nitro/util/arbmath"
 	"github.com/offchainlabs/nitro/util/testhelpers"
 )
 
@@ -118,6 +119,24 @@ func (s *orcaMsgStore) readSocket(t *testing.T, conn net.Conn) {
 	}
 }
 
+// argsForMulticallEmit — argsForMulticall과 같되 kind에 emit 플래그(0x8)를 세워
+// MultiCallTest가 Called 로그를 방출하게 한다. 같은 tx에서 native transfer와 로그가
+// 함께 나오므로 inner_index interleave를 실체인에서 검증할 수 있다.
+func argsForMulticallEmit(address common.Address, value *big.Int, calldata []byte) []byte {
+	args := []byte{0x01}
+	length := 21 + len(calldata) + 32
+	// #nosec G115
+	args = append(args, arbmath.Uint32ToBytes(uint32(length))...)
+	args = append(args, 0x08) // CALL(0x0) | emit(0x8)
+	if value == nil {
+		value = common.Big0
+	}
+	args = append(args, common.BigToHash(value).Bytes()...)
+	args = append(args, address.Bytes()...)
+	args = append(args, calldata...)
+	return args
+}
+
 func orcaSocketPath(t *testing.T) string {
 	t.Helper()
 	// t.TempDir()는 macOS unix socket 경로 한계(104B)를 넘을 수 있어 짧은 경로 사용
@@ -175,7 +194,7 @@ func TestOrcaFeedLiveDispatch(t *testing.T) {
 
 	innerValue := big.NewInt(400)
 	outerValue := big.NewInt(1000)
-	callData := argsForMulticall(vm.CALL, user2, innerValue, nil)
+	callData := argsForMulticallEmit(user2, innerValue, nil)
 	tx3 := seqInfo.PrepareTxTo("Owner", &multiAddr, 1e9, outerValue, callData)
 	Require(t, seqClient.SendTransaction(ctx, tx3))
 	_, err = EnsureTxSucceeded(ctx, seqClient, tx3)
@@ -242,6 +261,45 @@ func TestOrcaFeedLiveDispatch(t *testing.T) {
 	}
 	if !foundOuter || !foundInner {
 		Fatal(t, "tx3 transfer 검증 실패 (outer:", foundOuter, " inner:", foundInner, "): ", msg3.Transfers)
+	}
+
+	// (4) 로그·transfer가 하나의 실행 순서 시퀀스를 공유하는지
+	if len(msg3.Logs) == 0 {
+		Fatal(t, "tx3에 로그가 없음 — MultiCallTest는 로그를 방출해야 함")
+	}
+	seen := map[uint16]bool{}
+	maxInner := uint16(0)
+	for _, l := range msg3.Logs {
+		if seen[l.InnerIndex] {
+			Fatal(t, "inner_index 중복(로그): ", l.InnerIndex)
+		}
+		seen[l.InnerIndex] = true
+		if l.InnerIndex > maxInner {
+			maxInner = l.InnerIndex
+		}
+	}
+	for _, tr := range msg3.Transfers {
+		if seen[tr.InnerIndex] {
+			Fatal(t, "inner_index 중복(transfer/로그 간): ", tr.InnerIndex)
+		}
+		seen[tr.InnerIndex] = true
+		if tr.InnerIndex > maxInner {
+			maxInner = tr.InnerIndex
+		}
+	}
+	// revert 없는 tx이므로 시퀀스는 0부터 촘촘해야 한다
+	if int(maxInner)+1 != len(seen) {
+		Fatal(t, "inner_index 시퀀스에 구멍: max=", maxInner, " count=", len(seen))
+	}
+	// top-level value transfer가 첫 이벤트
+	var topLevel *orcafeed.TransferRecord
+	for i := range msg3.Transfers {
+		if msg3.Transfers[i].Depth == 0 {
+			topLevel = &msg3.Transfers[i]
+		}
+	}
+	if topLevel == nil || topLevel.InnerIndex != 0 {
+		Fatal(t, "top-level transfer가 inner_index 0이 아님: ", topLevel)
 	}
 
 	// seq 단조증가 (drop 없음 전제)
@@ -339,6 +397,15 @@ func testOrcaFeedSweep(t *testing.T, scheme string) {
 	}
 	if !foundInner {
 		Fatal(t, "sweep internal transfer 미발견: ", msg3.Transfers)
+	}
+
+	// 로그·transfer가 같은 시퀀스를 공유 (충돌 없음)
+	for _, l := range msg3.Logs {
+		for _, tr := range msg3.Transfers {
+			if l.InnerIndex == tr.InnerIndex {
+				Fatal(t, "sweep: 로그·transfer inner_index 충돌: ", l.InnerIndex)
+			}
+		}
 	}
 
 	store.mu.Lock()

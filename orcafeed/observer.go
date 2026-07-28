@@ -7,6 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 // Sink는 dispatch 대상 — 프로덕션은 orcasock.Dispatcher, 테스트는 메모리 sink.
@@ -105,13 +106,18 @@ func (o *BlockObserver) buildReceiptMsg(tx *types.Transaction, sender common.Add
 		transfers = make([]TransferRecord, len(recs))
 		copy(transfers, recs)
 	}
-	return newReceiptMsg(o.blockNumber, o.l2Timestamp, txIndex, tx, sender, receipt, transfers,
+	var logs []LogRecord
+	if ls := o.collector.DrainLogs(); len(ls) > 0 {
+		logs = make([]LogRecord, len(ls))
+		copy(logs, ls)
+	}
+	return newReceiptMsg(o.blockNumber, o.l2Timestamp, txIndex, tx, sender, receipt, transfers, logs,
 		func(addr common.Address) bool { return isContractCached(statedb, o.codeCache, addr) })
 }
 
 // newReceiptMsg — live(BlockObserver)·sweep(SweepObserver) 공용 메시지 조립.
 // transfers는 호출자가 소유권을 넘긴 슬라이스여야 한다 (재사용 버퍼 금지).
-func newReceiptMsg(blockNumber, l2Timestamp uint64, txIndex int, tx *types.Transaction, sender common.Address, receipt *types.Receipt, transfers []TransferRecord, isContract func(common.Address) bool) *ReceiptMsg {
+func newReceiptMsg(blockNumber, l2Timestamp uint64, txIndex int, tx *types.Transaction, sender common.Address, receipt *types.Receipt, transfers []TransferRecord, logs []LogRecord, isContract func(common.Address) bool) *ReceiptMsg {
 	// PERF:ALLOC
 	//   cost: mem=O(1)·struct + O(N_logs+N_transfers) 슬라이스/tx, N~1e0..1e2 → N 불확실
 	//   note: msg는 writer가 비동기 직렬화하므로 tx-scope 버퍼 재사용 불가
@@ -148,14 +154,23 @@ func newReceiptMsg(blockNumber, l2Timestamp uint64, txIndex int, tx *types.Trans
 	if receipt.EffectiveGasPrice != nil {
 		msg.EffectiveGasPrice = receipt.EffectiveGasPrice.Bytes()
 	}
-	if len(receipt.Logs) > 0 {
-		msg.Logs = make([]LogRecord, len(receipt.Logs))
-		for i, l := range receipt.Logs {
-			topics := make([][32]byte, len(l.Topics))
-			for j, topic := range l.Topics {
-				topics[j] = topic
+	// collector가 관측한 로그를 쓴다 (inner_index 보유). revert 필터링까지 끝난
+	// 상태라 receipt.Logs와 개수가 같아야 한다 — 어긋나면 관측 누락이므로
+	// 경고하고 receipt.Logs로 폴백한다 (순서 정보는 잃되 데이터는 지킨다).
+	if len(logs) == len(receipt.Logs) {
+		msg.Logs = logs
+	} else {
+		log.Warn("orcafeed: collector log count mismatch, falling back to receipt logs",
+			"collector", len(logs), "receipt", len(receipt.Logs), "tx", tx.Hash())
+		if len(receipt.Logs) > 0 {
+			msg.Logs = make([]LogRecord, len(receipt.Logs))
+			for i, l := range receipt.Logs {
+				topics := make([][32]byte, len(l.Topics))
+				for j, topic := range l.Topics {
+					topics[j] = topic
+				}
+				msg.Logs[i] = LogRecord{Address: l.Address, Topics: topics, Data: l.Data}
 			}
-			msg.Logs[i] = LogRecord{Address: l.Address, Topics: topics, Data: l.Data}
 		}
 	}
 	return msg

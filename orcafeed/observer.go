@@ -73,14 +73,12 @@ func (o *BlockObserver) OnTxAccepted(tx *types.Transaction, sender common.Addres
 	o.collector.Reset()
 }
 
-// OnBlockSealed — blockHash 확정 직후 (ProduceBlockAdvanced 반환 직전) 호출.
+// OnBlockSealed — 블록 seal 직후 (ProduceBlockAdvanced 반환 직전) 호출.
 func (o *BlockObserver) OnBlockSealed(block *types.Block) {
-	blockHash := block.Hash()
 	if o.mode == "tx" {
 		seal := &BlockSealMsg{
 			Seq:         0,
 			BlockNumber: block.NumberU64(),
-			BlockHash:   blockHash,
 			// #nosec G115
 			TxCount: uint32(len(block.Transactions())),
 		}
@@ -88,7 +86,6 @@ func (o *BlockObserver) OnBlockSealed(block *types.Block) {
 		return
 	}
 	for _, msg := range o.pendingMsgs {
-		msg.BlockHash = blockHash
 		o.sink.Enqueue(MsgReceipt, msg)
 	}
 	o.pendingMsgs = o.pendingMsgs[:0]
@@ -124,7 +121,6 @@ func newReceiptMsg(blockNumber, l2Timestamp uint64, txIndex int, tx *types.Trans
 	msg := &ReceiptMsg{
 		Seq:         0,
 		BlockNumber: blockNumber,
-		BlockHash:   [32]byte{},
 		// #nosec G115
 		TxIndex:           uint32(txIndex),
 		L2Timestamp:       l2Timestamp,

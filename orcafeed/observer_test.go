@@ -71,9 +71,6 @@ func TestObserverTxModeDispatch(t *testing.T) {
 	if msg.BlockNumber != 100 || msg.L2Timestamp != 1753689600 || msg.TxIndex != 1 {
 		t.Fatalf("블록 컨텍스트: %+v", msg)
 	}
-	if msg.BlockHash != ([32]byte{}) {
-		t.Fatalf("tx 모드는 blockHash zero: %+v", msg.BlockHash)
-	}
 	if msg.From != sender || msg.To != to || !msg.ToIsContract {
 		t.Fatalf("from/to/contract 플래그: %+v", msg)
 	}
@@ -95,7 +92,7 @@ func TestObserverTxModeDispatch(t *testing.T) {
 		t.Fatalf("BlockSealMsg 없음: %+v", sink.msgs)
 	}
 	seal := sink.msgs[1].msg.(*BlockSealMsg)
-	if seal.BlockNumber != 100 || seal.TxCount != 1 || seal.BlockHash == ([32]byte{}) {
+	if seal.BlockNumber != 100 || seal.TxCount != 1 {
 		t.Fatalf("seal: %+v", seal)
 	}
 }
@@ -123,8 +120,8 @@ func TestObserverBlockModeDispatch(t *testing.T) {
 		t.Fatalf("seal 후 일괄 dispatch: %+v", sink.msgs)
 	}
 	msg := sink.msgs[0].msg.(*ReceiptMsg)
-	if msg.BlockHash == ([32]byte{}) {
-		t.Fatalf("block 모드는 blockHash 채움: %+v", msg)
+	if msg.BlockNumber != 200 || msg.TxIndex != 0 {
+		t.Fatalf("block 모드 컨텍스트: %+v", msg)
 	}
 	if msg.ToIsContract {
 		t.Fatalf("EOA인데 contract 플래그: %+v", msg)

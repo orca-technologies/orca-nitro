@@ -14,8 +14,8 @@ func (z *BlockSealMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 4 {
-		err = msgp.ArrayError{Wanted: 4, Got: zb0001}
+	if zb0001 != 3 {
+		err = msgp.ArrayError{Wanted: 3, Got: zb0001}
 		return
 	}
 	z.Seq, err = dc.ReadUint64()
@@ -28,11 +28,6 @@ func (z *BlockSealMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 		err = msgp.WrapError(err, "BlockNumber")
 		return
 	}
-	err = dc.ReadExactBytes((z.BlockHash)[:])
-	if err != nil {
-		err = msgp.WrapError(err, "BlockHash")
-		return
-	}
 	z.TxCount, err = dc.ReadUint32()
 	if err != nil {
 		err = msgp.WrapError(err, "TxCount")
@@ -42,9 +37,9 @@ func (z *BlockSealMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 }
 
 // EncodeMsg implements msgp.Encodable
-func (z *BlockSealMsg) EncodeMsg(en *msgp.Writer) (err error) {
-	// array header, size 4
-	err = en.Append(0x94)
+func (z BlockSealMsg) EncodeMsg(en *msgp.Writer) (err error) {
+	// array header, size 3
+	err = en.Append(0x93)
 	if err != nil {
 		return
 	}
@@ -58,11 +53,6 @@ func (z *BlockSealMsg) EncodeMsg(en *msgp.Writer) (err error) {
 		err = msgp.WrapError(err, "BlockNumber")
 		return
 	}
-	err = en.WriteBytes((z.BlockHash)[:])
-	if err != nil {
-		err = msgp.WrapError(err, "BlockHash")
-		return
-	}
 	err = en.WriteUint32(z.TxCount)
 	if err != nil {
 		err = msgp.WrapError(err, "TxCount")
@@ -72,13 +62,12 @@ func (z *BlockSealMsg) EncodeMsg(en *msgp.Writer) (err error) {
 }
 
 // MarshalMsg implements msgp.Marshaler
-func (z *BlockSealMsg) MarshalMsg(b []byte) (o []byte, err error) {
+func (z BlockSealMsg) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.Require(b, z.Msgsize())
-	// array header, size 4
-	o = append(o, 0x94)
+	// array header, size 3
+	o = append(o, 0x93)
 	o = msgp.AppendUint64(o, z.Seq)
 	o = msgp.AppendUint64(o, z.BlockNumber)
-	o = msgp.AppendBytes(o, (z.BlockHash)[:])
 	o = msgp.AppendUint32(o, z.TxCount)
 	return
 }
@@ -91,8 +80,8 @@ func (z *BlockSealMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 4 {
-		err = msgp.ArrayError{Wanted: 4, Got: zb0001}
+	if zb0001 != 3 {
+		err = msgp.ArrayError{Wanted: 3, Got: zb0001}
 		return
 	}
 	z.Seq, bts, err = msgp.ReadUint64Bytes(bts)
@@ -105,11 +94,6 @@ func (z *BlockSealMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 		err = msgp.WrapError(err, "BlockNumber")
 		return
 	}
-	bts, err = msgp.ReadExactBytes(bts, (z.BlockHash)[:])
-	if err != nil {
-		err = msgp.WrapError(err, "BlockHash")
-		return
-	}
 	z.TxCount, bts, err = msgp.ReadUint32Bytes(bts)
 	if err != nil {
 		err = msgp.WrapError(err, "TxCount")
@@ -120,8 +104,8 @@ func (z *BlockSealMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 }
 
 // Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
-func (z *BlockSealMsg) Msgsize() (s int) {
-	s = 1 + msgp.Uint64Size + msgp.Uint64Size + msgp.ArrayHeaderSize + (32 * (msgp.ByteSize)) + msgp.Uint32Size
+func (z BlockSealMsg) Msgsize() (s int) {
+	s = 1 + msgp.Uint64Size + msgp.Uint64Size + msgp.Uint32Size
 	return
 }
 
@@ -617,8 +601,8 @@ func (z *ReceiptMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 21 {
-		err = msgp.ArrayError{Wanted: 21, Got: zb0001}
+	if zb0001 != 20 {
+		err = msgp.ArrayError{Wanted: 20, Got: zb0001}
 		return
 	}
 	z.Seq, err = dc.ReadUint64()
@@ -629,11 +613,6 @@ func (z *ReceiptMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 	z.BlockNumber, err = dc.ReadUint64()
 	if err != nil {
 		err = msgp.WrapError(err, "BlockNumber")
-		return
-	}
-	err = dc.ReadExactBytes((z.BlockHash)[:])
-	if err != nil {
-		err = msgp.WrapError(err, "BlockHash")
 		return
 	}
 	z.TxIndex, err = dc.ReadUint32()
@@ -722,10 +701,10 @@ func (z *ReceiptMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 	} else {
 		z.Logs = make([]LogRecord, zb0002)
 	}
-	for za0005 := range z.Logs {
-		err = z.Logs[za0005].DecodeMsg(dc)
+	for za0004 := range z.Logs {
+		err = z.Logs[za0004].DecodeMsg(dc)
 		if err != nil {
-			err = msgp.WrapError(err, "Logs", za0005)
+			err = msgp.WrapError(err, "Logs", za0004)
 			return
 		}
 	}
@@ -740,10 +719,10 @@ func (z *ReceiptMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 	} else {
 		z.Transfers = make([]TransferRecord, zb0003)
 	}
-	for za0006 := range z.Transfers {
-		err = z.Transfers[za0006].DecodeMsg(dc)
+	for za0005 := range z.Transfers {
+		err = z.Transfers[za0005].DecodeMsg(dc)
 		if err != nil {
-			err = msgp.WrapError(err, "Transfers", za0006)
+			err = msgp.WrapError(err, "Transfers", za0005)
 			return
 		}
 	}
@@ -757,8 +736,8 @@ func (z *ReceiptMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 
 // EncodeMsg implements msgp.Encodable
 func (z *ReceiptMsg) EncodeMsg(en *msgp.Writer) (err error) {
-	// array header, size 21
-	err = en.Append(0xdc, 0x0, 0x15)
+	// array header, size 20
+	err = en.Append(0xdc, 0x0, 0x14)
 	if err != nil {
 		return
 	}
@@ -770,11 +749,6 @@ func (z *ReceiptMsg) EncodeMsg(en *msgp.Writer) (err error) {
 	err = en.WriteUint64(z.BlockNumber)
 	if err != nil {
 		err = msgp.WrapError(err, "BlockNumber")
-		return
-	}
-	err = en.WriteBytes((z.BlockHash)[:])
-	if err != nil {
-		err = msgp.WrapError(err, "BlockHash")
 		return
 	}
 	err = en.WriteUint32(z.TxIndex)
@@ -857,10 +831,10 @@ func (z *ReceiptMsg) EncodeMsg(en *msgp.Writer) (err error) {
 		err = msgp.WrapError(err, "Logs")
 		return
 	}
-	for za0005 := range z.Logs {
-		err = z.Logs[za0005].EncodeMsg(en)
+	for za0004 := range z.Logs {
+		err = z.Logs[za0004].EncodeMsg(en)
 		if err != nil {
-			err = msgp.WrapError(err, "Logs", za0005)
+			err = msgp.WrapError(err, "Logs", za0004)
 			return
 		}
 	}
@@ -869,10 +843,10 @@ func (z *ReceiptMsg) EncodeMsg(en *msgp.Writer) (err error) {
 		err = msgp.WrapError(err, "Transfers")
 		return
 	}
-	for za0006 := range z.Transfers {
-		err = z.Transfers[za0006].EncodeMsg(en)
+	for za0005 := range z.Transfers {
+		err = z.Transfers[za0005].EncodeMsg(en)
 		if err != nil {
-			err = msgp.WrapError(err, "Transfers", za0006)
+			err = msgp.WrapError(err, "Transfers", za0005)
 			return
 		}
 	}
@@ -887,11 +861,10 @@ func (z *ReceiptMsg) EncodeMsg(en *msgp.Writer) (err error) {
 // MarshalMsg implements msgp.Marshaler
 func (z *ReceiptMsg) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.Require(b, z.Msgsize())
-	// array header, size 21
-	o = append(o, 0xdc, 0x0, 0x15)
+	// array header, size 20
+	o = append(o, 0xdc, 0x0, 0x14)
 	o = msgp.AppendUint64(o, z.Seq)
 	o = msgp.AppendUint64(o, z.BlockNumber)
-	o = msgp.AppendBytes(o, (z.BlockHash)[:])
 	o = msgp.AppendUint32(o, z.TxIndex)
 	o = msgp.AppendUint64(o, z.L2Timestamp)
 	o = msgp.AppendUint8(o, z.TxType)
@@ -908,18 +881,18 @@ func (z *ReceiptMsg) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.AppendUint64(o, z.GasUsed)
 	o = msgp.AppendUint64(o, z.CumulativeGasUsed)
 	o = msgp.AppendArrayHeader(o, uint32(len(z.Logs)))
-	for za0005 := range z.Logs {
-		o, err = z.Logs[za0005].MarshalMsg(o)
+	for za0004 := range z.Logs {
+		o, err = z.Logs[za0004].MarshalMsg(o)
 		if err != nil {
-			err = msgp.WrapError(err, "Logs", za0005)
+			err = msgp.WrapError(err, "Logs", za0004)
 			return
 		}
 	}
 	o = msgp.AppendArrayHeader(o, uint32(len(z.Transfers)))
-	for za0006 := range z.Transfers {
-		o, err = z.Transfers[za0006].MarshalMsg(o)
+	for za0005 := range z.Transfers {
+		o, err = z.Transfers[za0005].MarshalMsg(o)
 		if err != nil {
-			err = msgp.WrapError(err, "Transfers", za0006)
+			err = msgp.WrapError(err, "Transfers", za0005)
 			return
 		}
 	}
@@ -935,8 +908,8 @@ func (z *ReceiptMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 21 {
-		err = msgp.ArrayError{Wanted: 21, Got: zb0001}
+	if zb0001 != 20 {
+		err = msgp.ArrayError{Wanted: 20, Got: zb0001}
 		return
 	}
 	z.Seq, bts, err = msgp.ReadUint64Bytes(bts)
@@ -947,11 +920,6 @@ func (z *ReceiptMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 	z.BlockNumber, bts, err = msgp.ReadUint64Bytes(bts)
 	if err != nil {
 		err = msgp.WrapError(err, "BlockNumber")
-		return
-	}
-	bts, err = msgp.ReadExactBytes(bts, (z.BlockHash)[:])
-	if err != nil {
-		err = msgp.WrapError(err, "BlockHash")
 		return
 	}
 	z.TxIndex, bts, err = msgp.ReadUint32Bytes(bts)
@@ -1040,10 +1008,10 @@ func (z *ReceiptMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 	} else {
 		z.Logs = make([]LogRecord, zb0002)
 	}
-	for za0005 := range z.Logs {
-		bts, err = z.Logs[za0005].UnmarshalMsg(bts)
+	for za0004 := range z.Logs {
+		bts, err = z.Logs[za0004].UnmarshalMsg(bts)
 		if err != nil {
-			err = msgp.WrapError(err, "Logs", za0005)
+			err = msgp.WrapError(err, "Logs", za0004)
 			return
 		}
 	}
@@ -1058,10 +1026,10 @@ func (z *ReceiptMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 	} else {
 		z.Transfers = make([]TransferRecord, zb0003)
 	}
-	for za0006 := range z.Transfers {
-		bts, err = z.Transfers[za0006].UnmarshalMsg(bts)
+	for za0005 := range z.Transfers {
+		bts, err = z.Transfers[za0005].UnmarshalMsg(bts)
 		if err != nil {
-			err = msgp.WrapError(err, "Transfers", za0006)
+			err = msgp.WrapError(err, "Transfers", za0005)
 			return
 		}
 	}
@@ -1076,13 +1044,13 @@ func (z *ReceiptMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 
 // Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
 func (z *ReceiptMsg) Msgsize() (s int) {
-	s = 3 + msgp.Uint64Size + msgp.Uint64Size + msgp.ArrayHeaderSize + (32 * (msgp.ByteSize)) + msgp.Uint32Size + msgp.Uint64Size + msgp.Uint8Size + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.BoolSize + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.Uint64Size + msgp.Uint64Size + msgp.BytesPrefixSize + len(z.EffectiveGasPrice) + msgp.BytesPrefixSize + len(z.Value) + msgp.BytesPrefixSize + len(z.Calldata) + msgp.Uint64Size + msgp.Uint64Size + msgp.Uint64Size + msgp.ArrayHeaderSize
-	for za0005 := range z.Logs {
-		s += z.Logs[za0005].Msgsize()
+	s = 3 + msgp.Uint64Size + msgp.Uint64Size + msgp.Uint32Size + msgp.Uint64Size + msgp.Uint8Size + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.BoolSize + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.Uint64Size + msgp.Uint64Size + msgp.BytesPrefixSize + len(z.EffectiveGasPrice) + msgp.BytesPrefixSize + len(z.Value) + msgp.BytesPrefixSize + len(z.Calldata) + msgp.Uint64Size + msgp.Uint64Size + msgp.Uint64Size + msgp.ArrayHeaderSize
+	for za0004 := range z.Logs {
+		s += z.Logs[za0004].Msgsize()
 	}
 	s += msgp.ArrayHeaderSize
-	for za0006 := range z.Transfers {
-		s += z.Transfers[za0006].Msgsize()
+	for za0005 := range z.Transfers {
+		s += z.Transfers[za0005].Msgsize()
 	}
 	s += msgp.Uint64Size
 	return

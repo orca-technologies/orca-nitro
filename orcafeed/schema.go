@@ -16,7 +16,7 @@ type MsgType byte
 const (
 	MsgHello        MsgType = 1 // Hello
 	MsgReceipt      MsgType = 2 // ReceiptMsg
-	MsgBlockSeal    MsgType = 3 // BlockSealMsg — tx 모드에서 blockHash 보완
+	MsgBlockSeal    MsgType = 3 // BlockSealMsg — tx 모드 블록 경계·tx_count
 	MsgInvalidation MsgType = 4 // InvalidationMsg — block commit 실패 통지
 	MsgRangeDone    MsgType = 5 // RangeDoneMsg — sweep chunk 완료 마커
 )
@@ -62,7 +62,6 @@ type LogRecord struct {
 type ReceiptMsg struct {
 	Seq               uint64
 	BlockNumber       uint64
-	BlockHash         [32]byte // tx 모드: zero (BlockSealMsg로 보완), block/sweep 모드: 채움
 	TxIndex           uint32
 	L2Timestamp       uint64
 	TxType            uint8
@@ -90,7 +89,6 @@ type ReceiptMsg struct {
 type BlockSealMsg struct {
 	Seq         uint64
 	BlockNumber uint64
-	BlockHash   [32]byte
 	TxCount     uint32 // 블록에 최종 포함된 tx 수 (internal tx 포함) — tx 모드 정합 확인용
 }
 

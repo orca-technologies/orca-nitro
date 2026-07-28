@@ -20,7 +20,7 @@ func goldenMessages() map[string]msgp.Marshaler {
 	return map[string]msgp.Marshaler{
 		"hello": &Hello{SchemaVersion: SchemaVersion, Mode: ModeLiveTx},
 		"receipt": &ReceiptMsg{
-			Seq: 7, BlockNumber: 123456, BlockHash: hash(0xbb), TxIndex: 2,
+			Seq: 7, BlockNumber: 123456, TxIndex: 2,
 			L2Timestamp: 1753689600, TxType: 2,
 			From: addr(0x01), To: addr(0x02), ToIsContract: true,
 			Nonce: 9, Gas: 21000, EffectiveGasPrice: []byte{0x3b, 0x9a, 0xca, 0x00},
@@ -36,7 +36,7 @@ func goldenMessages() map[string]msgp.Marshaler {
 			}},
 			EmittedAtNs: 1_753_689_600_123_456_789,
 		},
-		"blockseal":    &BlockSealMsg{Seq: 8, BlockNumber: 123456, BlockHash: hash(0xbb), TxCount: 3},
+		"blockseal":    &BlockSealMsg{Seq: 8, BlockNumber: 123456, TxCount: 3},
 		"invalidation": &InvalidationMsg{Seq: 9, BlockNumber: 123456},
 		"rangedone":    &RangeDoneMsg{Seq: 10, StartBlock: 100, EndBlock: 200},
 	}

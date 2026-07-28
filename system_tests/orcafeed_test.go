@@ -226,9 +226,6 @@ func TestOrcaFeedLiveDispatch(t *testing.T) {
 	if new(big.Int).SetBytes(msg1.Value).Cmp(transferValue) != 0 {
 		Fatal(t, "tx1 value 불일치")
 	}
-	if msg1.BlockHash != ([32]byte{}) {
-		Fatal(t, "tx 모드는 blockHash가 비어야 함")
-	}
 	var found1 bool
 	for _, tr := range msg1.Transfers {
 		if common.Address(tr.To) == user2 && new(big.Int).SetBytes(tr.Value).Cmp(transferValue) == 0 && tr.Depth == 0 && !tr.Reverted {
@@ -242,11 +239,11 @@ func TestOrcaFeedLiveDispatch(t *testing.T) {
 		Fatal(t, "tx1 depth-0 transfer 미발견: ", msg1.Transfers)
 	}
 
-	// tx1 블록의 BlockSeal 확인 (blockHash 보완 + TxCount)
+	// tx1 블록의 BlockSeal 확인 (TxCount)
 	store.mu.Lock()
 	seal := store.seals[msg1.BlockNumber]
 	store.mu.Unlock()
-	if seal == nil || seal.BlockHash == ([32]byte{}) || seal.TxCount < 2 {
+	if seal == nil || seal.TxCount < 2 {
 		Fatal(t, "BlockSeal 불일치: ", seal)
 	}
 
@@ -381,9 +378,9 @@ func testOrcaFeedSweep(t *testing.T, scheme string) {
 	executor.Start(ctx)
 	Require(t, executor.WaitForReExecution(ctx))
 
-	// live와 동일 스키마 + blockHash 채워짐
+	// live와 동일 스키마
 	msg1 := store.receipt(receipt1.BlockNumber.Uint64(), uint32(receipt1.TransactionIndex))
-	if msg1 == nil || msg1.BlockHash == ([32]byte{}) {
+	if msg1 == nil || msg1.BlockNumber != receipt1.BlockNumber.Uint64() {
 		Fatal(t, "sweep tx1 receipt 불일치: ", msg1)
 	}
 	if common.Address(msg1.To) != user2 || new(big.Int).SetBytes(msg1.Value).Cmp(big.NewInt(1e12)) != 0 {

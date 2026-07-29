@@ -81,7 +81,8 @@ func (o *SweepObserver) OnBlockExecuted(block *types.Block, receipts types.Recei
 			transfers = cp.transfers
 			logs = cp.logs
 		}
-		msg := newReceiptMsg(blockNumber, block.Time(), i, tx, sender, receipts[i], transfers, logs,
+		l1BlockNumber := types.DeserializeHeaderExtraInformation(block.Header()).L1BlockNumber
+		msg := newReceiptMsg(blockNumber, block.Time(), l1BlockNumber, i, tx, sender, receipts[i], transfers, logs,
 			func(addr common.Address) bool { return isContractCached(statedb, codeCache, addr) })
 		o.sink.Enqueue(MsgReceipt, msg)
 	}

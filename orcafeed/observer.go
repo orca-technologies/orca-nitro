@@ -23,8 +23,9 @@ type BlockObserver struct {
 	mode      string // "tx" | "block"
 	collector *Collector
 
-	blockNumber uint64
-	l2Timestamp uint64
+	blockNumber   uint64
+	l2Timestamp   uint64
+	l1BlockNumber uint64
 
 	// PERF:MEM-GROW
 	//   cost: mem=O(N_addrs)/block, N~1e0..1e2 → 블록마다 clear
@@ -37,20 +38,23 @@ type BlockObserver struct {
 
 func NewBlockObserver(sink Sink, mode string) *BlockObserver {
 	return &BlockObserver{
-		sink:        sink,
-		mode:        mode,
-		collector:   NewCollector(),
-		blockNumber: 0,
-		l2Timestamp: 0,
-		codeCache:   make(map[common.Address]bool),
-		pendingMsgs: nil,
+		sink:          sink,
+		mode:          mode,
+		collector:     NewCollector(),
+		blockNumber:   0,
+		l2Timestamp:   0,
+		l1BlockNumber: 0,
+		codeCache:     make(map[common.Address]bool),
+		pendingMsgs:   nil,
 	}
 }
 
 // BeginBlock — ProduceBlockAdvanced 초입에서 호출.
-func (o *BlockObserver) BeginBlock(blockNumber uint64, l2Timestamp uint64) {
+// l1BlockNumber는 이 L2 블록을 만든 L1 incoming message의 block number.
+func (o *BlockObserver) BeginBlock(blockNumber uint64, l2Timestamp uint64, l1BlockNumber uint64) {
 	o.blockNumber = blockNumber
 	o.l2Timestamp = l2Timestamp
+	o.l1BlockNumber = l1BlockNumber
 	clear(o.codeCache)
 	o.pendingMsgs = o.pendingMsgs[:0]
 	o.collector.Reset()
@@ -108,13 +112,13 @@ func (o *BlockObserver) buildReceiptMsg(tx *types.Transaction, sender common.Add
 		logs = make([]LogRecord, len(ls))
 		copy(logs, ls)
 	}
-	return newReceiptMsg(o.blockNumber, o.l2Timestamp, txIndex, tx, sender, receipt, transfers, logs,
+	return newReceiptMsg(o.blockNumber, o.l2Timestamp, o.l1BlockNumber, txIndex, tx, sender, receipt, transfers, logs,
 		func(addr common.Address) bool { return isContractCached(statedb, o.codeCache, addr) })
 }
 
 // newReceiptMsg — live(BlockObserver)·sweep(SweepObserver) 공용 메시지 조립.
 // transfers는 호출자가 소유권을 넘긴 슬라이스여야 한다 (재사용 버퍼 금지).
-func newReceiptMsg(blockNumber, l2Timestamp uint64, txIndex int, tx *types.Transaction, sender common.Address, receipt *types.Receipt, transfers []TransferRecord, logs []LogRecord, isContract func(common.Address) bool) *ReceiptMsg {
+func newReceiptMsg(blockNumber, l2Timestamp, l1BlockNumber uint64, txIndex int, tx *types.Transaction, sender common.Address, receipt *types.Receipt, transfers []TransferRecord, logs []LogRecord, isContract func(common.Address) bool) *ReceiptMsg {
 	// PERF:ALLOC
 	//   cost: mem=O(1)·struct + O(N_logs+N_transfers) 슬라이스/tx, N~1e0..1e2 → N 불확실
 	//   note: msg는 writer가 비동기 직렬화하므로 tx-scope 버퍼 재사용 불가
@@ -137,6 +141,8 @@ func newReceiptMsg(blockNumber, l2Timestamp uint64, txIndex int, tx *types.Trans
 		Status:            receipt.Status,
 		GasUsed:           receipt.GasUsed,
 		CumulativeGasUsed: receipt.CumulativeGasUsed,
+		GasUsedForL1:      receipt.GasUsedForL1,
+		L1BlockNumber:     l1BlockNumber,
 		Logs:              nil,
 		Transfers:         transfers,
 		// #nosec G115

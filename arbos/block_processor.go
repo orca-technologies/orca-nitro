@@ -363,7 +363,7 @@ func ProduceBlockAdvanced(
 
 	header := createNewHeader(lastBlockHeader, l1Info, baseFee, chainConfig)
 	if observer != nil {
-		observer.BeginBlock(header.Number.Uint64(), header.Time)
+		observer.BeginBlock(header.Number.Uint64(), header.Time, l1Info.l1BlockNumber)
 	}
 	// Note: blockGasLeft will diverge from the actual gas left during execution in the event of invalid txs,
 	// but it's only used as block-local representation limiting the amount of work done in a block.

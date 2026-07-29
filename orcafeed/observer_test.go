@@ -55,7 +55,7 @@ func TestObserverTxModeDispatch(t *testing.T) {
 	sdb.SetCode(to, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified)
 	sender := common.HexToAddress("0x2222222222222222222222222222222222222222")
 
-	obs.BeginBlock(100, 1753689600)
+	obs.BeginBlock(100, 1753689600, 99)
 
 	// collector에 transfer 하나 주입 (실행 중 훅 발화 시뮬레이션)
 	obs.EVMHooks().OnBalanceChange(sender, big.NewInt(50), big.NewInt(20), tracing.BalanceChangeTransfer)
@@ -70,6 +70,9 @@ func TestObserverTxModeDispatch(t *testing.T) {
 	msg := sink.msgs[0].msg.(*ReceiptMsg)
 	if msg.BlockNumber != 100 || msg.L2Timestamp != 1753689600 || msg.TxIndex != 1 {
 		t.Fatalf("블록 컨텍스트: %+v", msg)
+	}
+	if msg.L1BlockNumber != 99 {
+		t.Fatalf("l1 block: %+v", msg)
 	}
 	if msg.From != sender || msg.To != to || !msg.ToIsContract {
 		t.Fatalf("from/to/contract 플래그: %+v", msg)
@@ -104,7 +107,7 @@ func TestObserverBlockModeDispatch(t *testing.T) {
 	to := common.HexToAddress("0x3333333333333333333333333333333333333333")
 	sender := common.HexToAddress("0x2222222222222222222222222222222222222222")
 
-	obs.BeginBlock(200, 1753689601)
+	obs.BeginBlock(200, 1753689601, 0)
 	tx, receipt := makeTxAndReceipt(to, 5, 1)
 	obs.OnTxAccepted(tx, sender, receipt, sdb, 0)
 
@@ -131,7 +134,7 @@ func TestObserverBlockModeDispatch(t *testing.T) {
 func TestObserverAppendFailed(t *testing.T) {
 	sink := &memSink{}
 	obs := NewBlockObserver(sink, "tx")
-	obs.BeginBlock(300, 0)
+	obs.BeginBlock(300, 0, 0)
 	obs.OnAppendFailed(300)
 	if len(sink.msgs) != 1 || sink.msgs[0].typ != MsgInvalidation {
 		t.Fatalf("invalidation: %+v", sink.msgs)
@@ -157,7 +160,7 @@ func TestObserverEmitsCollectorLogsWithInnerIndex(t *testing.T) {
 	to := common.HexToAddress("0x4444444444444444444444444444444444444444")
 	sender := common.HexToAddress("0x5555555555555555555555555555555555555555")
 
-	obs.BeginBlock(300, 1753689600)
+	obs.BeginBlock(300, 1753689600, 0)
 	h := obs.EVMHooks()
 	// transfer(inner 0) → log(inner 1)
 	h.OnBalanceChange(sender, big.NewInt(50), big.NewInt(20), tracing.BalanceChangeTransfer)
@@ -183,7 +186,7 @@ func TestObserverFallsBackWhenLogCountMismatches(t *testing.T) {
 	to := common.HexToAddress("0x6666666666666666666666666666666666666666")
 	sender := common.HexToAddress("0x7777777777777777777777777777777777777777")
 
-	obs.BeginBlock(301, 0)
+	obs.BeginBlock(301, 0, 0)
 	// collector에 로그를 넣지 않는다 — receipt.Logs(1건)와 불일치
 	tx, receipt := makeTxAndReceipt(to, 1, 1)
 	obs.OnTxAccepted(tx, sender, receipt, sdb, 0)

@@ -132,6 +132,13 @@ func NewDispatcher(cfg *orcafeed.Config, mode string) (*Dispatcher, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 다계정 컨슈머 허용: unix socket connect는 write 권한이 필요하다.
+	// 노드 계정 분리(기록기=ubuntu, executor=rudy) 전제 — 접근 통제는 호스트
+	// 계정/SG가 담당하므로 0666으로 연다.
+	if err := os.Chmod(cfg.SocketPath, 0o666); err != nil {
+		listener.Close()
+		return nil, err
+	}
 	d := &Dispatcher{
 		mode:        mode,
 		socketPath:  cfg.SocketPath,

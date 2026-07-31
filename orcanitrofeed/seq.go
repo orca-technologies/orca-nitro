@@ -1,4 +1,4 @@
-package orcafeed
+package orcanitrofeed
 
 import "github.com/tinylib/msgp/msgp"
 

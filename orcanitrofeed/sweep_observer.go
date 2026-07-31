@@ -1,4 +1,4 @@
-package orcafeed
+package orcanitrofeed
 
 import (
 	"github.com/ethereum/go-ethereum/common"

@@ -12,19 +12,19 @@ feed tx가 실행되는 즉시 enriched receipt(+native transfer 전체)를 로�
 
 ```bash
 nitro \
-  --execution.orca-feed.enable \
-  --execution.orca-feed.socket-path /run/orca/feed.sock \
-  --execution.orca-feed.mode tx \
+  --execution.orca-nitro-feed.enable \
+  --execution.orca-nitro-feed.socket-path /run/orca/feed.sock \
+  --execution.orca-nitro-feed.mode tx \
   ... # 기존 노드 플래그
 ```
 
 | 플래그 | 기본 | 설명 |
 |---|---|---|
-| `--execution.orca-feed.enable` | false | dispatch 활성화 |
-| `--execution.orca-feed.socket-path` | — | unix socket 경로 (필수) |
-| `--execution.orca-feed.mode` | `tx` | `tx`: tx 실행 완료마다 즉시 (blockHash 없음, BlockSeal로 보완) / `block`: 블록 완성 직후 (blockHash 포함). 둘 다 DB commit **전** |
-| `--execution.orca-feed.buffer-size` | 4096 | 인코딩 staging ring 슬롯 수 (burst 흡수) |
-| `--execution.orca-feed.buffer-bytes` | 1GiB | **retention log** 바이트 예산 — 컨슈머(feeder) 다운타임 동안 인코딩 프레임을 보관하고 재접속 시 backlog 전체 replay. 예산 초과분은 oldest부터 폐기(seq gap으로 감지) |
+| `--execution.orca-nitro-feed.enable` | false | dispatch 활성화 |
+| `--execution.orca-nitro-feed.socket-path` | — | unix socket 경로 (필수) |
+| `--execution.orca-nitro-feed.mode` | `tx` | `tx`: tx 실행 완료마다 즉시 (blockHash 없음, BlockSeal로 보완) / `block`: 블록 완성 직후 (blockHash 포함). 둘 다 DB commit **전** |
+| `--execution.orca-nitro-feed.buffer-size` | 4096 | 인코딩 staging ring 슬롯 수 (burst 흡수) |
+| `--execution.orca-nitro-feed.buffer-bytes` | 1GiB | **retention log** 바이트 예산 — 컨슈머(feeder) 다운타임 동안 인코딩 프레임을 보관하고 재접속 시 backlog 전체 replay. 예산 초과분은 oldest부터 폐기(seq gap으로 감지) |
 
 ### Sweep (과거 block range 재실행)
 
@@ -38,8 +38,8 @@ nitro \
   --blocks-reexecutor.blocks '[[15078295, 21107733]]' \
   --blocks-reexecutor.room 16 \
   --init.then-quit \
-  --execution.orca-feed.enable \
-  --execution.orca-feed.socket-path /run/orca/sweep.sock \
+  --execution.orca-nitro-feed.enable \
+  --execution.orca-nitro-feed.socket-path /run/orca/sweep.sock \
   ... # datadir 등
 ```
 
@@ -67,7 +67,7 @@ msgpack은 **array-mode**(필드명 없음, 위치 기반). 스키마 변경 시
 
 ### ReceiptMsg 필드 (array 순서 = 스키마 순서)
 
-`orcafeed/schema.go`가 SoT. 순서대로:
+`orcanitrofeed/schema.go`가 SoT. 순서대로:
 `seq, blockNumber, blockHash(32B, tx모드 zero), txIndex, l2Timestamp, txHash(32B),
 txType, from(20B), to(20B), toIsContract, contractAddress(20B), nonce, gas,
 effectiveGasPrice(BE bytes), value(BE bytes), calldata, status, gasUsed,
@@ -85,7 +85,7 @@ postBalanceTo(BE|nil), depth u16, reverted bool]`
 - top-level·internal transfer 통합. `depth`: 0 = top-level, 1+ = internal call depth
 - `reason`: geth `tracing.BalanceChangeReason` — transfer(10), selfdestruct(12/13/14),
   deposit(129), withdrawToL1(130) 등. gas/fee/refund류는 수집하지 않음
-  (정책: `orcafeed/collector.go` `includedReasons`)
+  (정책: `orcanitrofeed/collector.go` `includedReasons`)
 - mint/burn은 한쪽 주소가 zero
 - `reverted=true`: revert된 subtree 내 transfer (실제 반영 안 됨 — 신호로만 사용)
 - `postBalance*`: transfer 적용 직후 잔액
@@ -108,18 +108,18 @@ struct TransferRecord {
 }
 ```
 
-golden fixture: `orcafeed/testdata/golden_v1_*.bin` — Rust 쪽 디코더 검증에 사용
+golden fixture: `orcanitrofeed/testdata/golden_v1_*.bin` — Rust 쪽 디코더 검증에 사용
 (dora-master 배포 시점 대조).
 
 ## 구현 지도
 
 | 파일 | 역할 |
 |---|---|
-| `orcafeed/schema.go` | wire 스키마 (msgp 코드젠) + SchemaVersion |
-| `orcafeed/collector.go` | tracing.Hooks → TransferRecord (pairing, depth, revert 전파) |
-| `orcafeed/observer.go` | live 블록 lifecycle (BeginBlock/OnTxAccepted/OnBlockSealed) |
-| `orcafeed/sweep_observer.go` | sweep 블록 단위 조립 |
-| `orcafeed/orcasock/dispatcher.go` | unix socket listener + drop-oldest ring + writer (net 의존 분리 — wasm replay 오염 방지) |
+| `orcanitrofeed/schema.go` | wire 스키마 (msgp 코드젠) + SchemaVersion |
+| `orcanitrofeed/collector.go` | tracing.Hooks → TransferRecord (pairing, depth, revert 전파) |
+| `orcanitrofeed/observer.go` | live 블록 lifecycle (BeginBlock/OnTxAccepted/OnBlockSealed) |
+| `orcanitrofeed/sweep_observer.go` | sweep 블록 단위 조립 |
+| `orcanitrofeed/orcasock/dispatcher.go` | unix socket listener + drop-oldest ring + writer (net 의존 분리 — wasm replay 오염 방지) |
 | `arbos/block_processor.go` | ProduceBlockAdvanced 훅 지점 (observer nil이면 무변경) |
 | `execution/gethexec/node.go` | config·dispatcher 생성 |
 | `blocks_reexecutor/` | sweep tracer·dispatch 주입 |

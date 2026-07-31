@@ -1,4 +1,4 @@
-package orcafeed
+package orcanitrofeed
 
 import (
 	"bytes"

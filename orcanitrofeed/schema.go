@@ -1,7 +1,7 @@
 // Copyright 2026 Orca Technologies.
-// orcafeed wire schema — msgpack array-mode (msgp tuple), lockstep 배포 전제.
+// orca-nitro-feed wire schema — msgpack array-mode (msgp tuple), lockstep 배포 전제.
 // 필드 추가·변경 시 SchemaVersion을 반드시 bump하고 Rust 클라이언트와 함께 배포한다.
-package orcafeed
+package orcanitrofeed
 
 //go:generate msgp -tests=false
 

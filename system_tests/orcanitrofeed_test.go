@@ -1,5 +1,5 @@
 // Copyright 2026 Orca Technologies.
-// orcafeed live/sweep dispatch 통합 테스트.
+// orca-nitro-feed live/sweep dispatch 통합 테스트.
 package arbtest
 
 import (
@@ -20,7 +20,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 
 	blocksreexecutor "github.com/offchainlabs/nitro/blocks_reexecutor"
-	"github.com/offchainlabs/nitro/orcafeed"
+	"github.com/offchainlabs/nitro/orcanitrofeed"
 	"github.com/offchainlabs/nitro/solgen/go/localgen"
 	"github.com/offchainlabs/nitro/util/arbmath"
 	"github.com/offchainlabs/nitro/util/testhelpers"
@@ -35,10 +35,10 @@ type receiptKey struct {
 // orcaMsgStore — 소켓/sink에서 수신한 메시지 집합 (goroutine-safe)
 type orcaMsgStore struct {
 	mu       sync.Mutex
-	hello    *orcafeed.Hello
-	receipts map[receiptKey]*orcafeed.ReceiptMsg
-	seals    map[uint64]*orcafeed.BlockSealMsg
-	ranges   []*orcafeed.RangeDoneMsg
+	hello    *orcanitrofeed.Hello
+	receipts map[receiptKey]*orcanitrofeed.ReceiptMsg
+	seals    map[uint64]*orcanitrofeed.BlockSealMsg
+	ranges   []*orcanitrofeed.RangeDoneMsg
 	seqs     []uint64
 }
 
@@ -46,33 +46,33 @@ func newOrcaMsgStore() *orcaMsgStore {
 	return &orcaMsgStore{
 		mu:       sync.Mutex{},
 		hello:    nil,
-		receipts: make(map[receiptKey]*orcafeed.ReceiptMsg),
-		seals:    make(map[uint64]*orcafeed.BlockSealMsg),
+		receipts: make(map[receiptKey]*orcanitrofeed.ReceiptMsg),
+		seals:    make(map[uint64]*orcanitrofeed.BlockSealMsg),
 		ranges:   nil,
 		seqs:     nil,
 	}
 }
 
-func (s *orcaMsgStore) Enqueue(typ orcafeed.MsgType, msg orcafeed.SeqSetter) {
+func (s *orcaMsgStore) Enqueue(typ orcanitrofeed.MsgType, msg orcanitrofeed.SeqSetter) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch m := msg.(type) {
-	case *orcafeed.ReceiptMsg:
+	case *orcanitrofeed.ReceiptMsg:
 		s.receipts[receiptKey{m.BlockNumber, m.TxIndex}] = m
-	case *orcafeed.BlockSealMsg:
+	case *orcanitrofeed.BlockSealMsg:
 		s.seals[m.BlockNumber] = m
-	case *orcafeed.RangeDoneMsg:
+	case *orcanitrofeed.RangeDoneMsg:
 		s.ranges = append(s.ranges, m)
 	}
 }
 
-func (s *orcaMsgStore) receipt(blockNumber uint64, txIndex uint32) *orcafeed.ReceiptMsg {
+func (s *orcaMsgStore) receipt(blockNumber uint64, txIndex uint32) *orcanitrofeed.ReceiptMsg {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.receipts[receiptKey{blockNumber, txIndex}]
 }
 
-func (s *orcaMsgStore) waitReceipt(t *testing.T, blockNumber uint64, txIndex uint32) *orcafeed.ReceiptMsg {
+func (s *orcaMsgStore) waitReceipt(t *testing.T, blockNumber uint64, txIndex uint32) *orcanitrofeed.ReceiptMsg {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
@@ -81,7 +81,7 @@ func (s *orcaMsgStore) waitReceipt(t *testing.T, blockNumber uint64, txIndex uin
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	Fatal(t, "orcafeed receipt 미수신: block=", blockNumber, " txIndex=", txIndex)
+	Fatal(t, "orca-nitro-feed receipt 미수신: block=", blockNumber, " txIndex=", txIndex)
 	return nil
 }
 
@@ -95,28 +95,28 @@ func (s *orcaMsgStore) readSocket(t *testing.T, conn net.Conn) {
 		if _, err := io.ReadFull(conn, payload); err != nil {
 			return
 		}
-		typ := orcafeed.MsgType(header[4])
+		typ := orcanitrofeed.MsgType(header[4])
 		s.mu.Lock()
 		switch typ {
-		case orcafeed.MsgHello:
-			var m orcafeed.Hello
+		case orcanitrofeed.MsgHello:
+			var m orcanitrofeed.Hello
 			if _, err := m.UnmarshalMsg(payload); err == nil {
 				s.hello = &m
 			}
-		case orcafeed.MsgReceipt:
-			var m orcafeed.ReceiptMsg
+		case orcanitrofeed.MsgReceipt:
+			var m orcanitrofeed.ReceiptMsg
 			if _, err := m.UnmarshalMsg(payload); err == nil {
 				s.receipts[receiptKey{m.BlockNumber, m.TxIndex}] = &m
 				s.seqs = append(s.seqs, m.Seq)
 			}
-		case orcafeed.MsgBlockSeal:
-			var m orcafeed.BlockSealMsg
+		case orcanitrofeed.MsgBlockSeal:
+			var m orcanitrofeed.BlockSealMsg
 			if _, err := m.UnmarshalMsg(payload); err == nil {
 				s.seals[m.BlockNumber] = &m
 				s.seqs = append(s.seqs, m.Seq)
 			}
-		case orcafeed.MsgRangeDone:
-			var m orcafeed.RangeDoneMsg
+		case orcanitrofeed.MsgRangeDone:
+			var m orcanitrofeed.RangeDoneMsg
 			if _, err := m.UnmarshalMsg(payload); err == nil {
 				s.ranges = append(s.ranges, &m)
 			}
@@ -152,7 +152,7 @@ func orcaSocketPath(t *testing.T) string {
 	return filepath.Join(dir, "o.sock")
 }
 
-func TestOrcaFeedLiveDispatch(t *testing.T) {
+func TestOrcaNitroFeedLiveDispatch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -169,9 +169,9 @@ func TestOrcaFeedLiveDispatch(t *testing.T) {
 	builder := NewNodeBuilder(ctx).DefaultConfig(t, false).DontParalellise()
 	builder.nodeConfig.Feed.Input = *newBroadcastClientConfigTest(port)
 	builder.takeOwnership = false
-	builder.execConfig.OrcaFeed = orcafeed.DefaultConfig
-	builder.execConfig.OrcaFeed.Enable = true
-	builder.execConfig.OrcaFeed.SocketPath = sock
+	builder.execConfig.OrcaNitroFeed = orcanitrofeed.DefaultConfig
+	builder.execConfig.OrcaNitroFeed.Enable = true
+	builder.execConfig.OrcaNitroFeed.SocketPath = sock
 	cleanup := builder.Build(t)
 	defer cleanup()
 	followerClient := builder.L2.Client
@@ -214,7 +214,7 @@ func TestOrcaFeedLiveDispatch(t *testing.T) {
 	store.mu.Lock()
 	hello := store.hello
 	store.mu.Unlock()
-	if hello == nil || hello.SchemaVersion != orcafeed.SchemaVersion || hello.Mode != orcafeed.ModeLiveTx {
+	if hello == nil || hello.SchemaVersion != orcanitrofeed.SchemaVersion || hello.Mode != orcanitrofeed.ModeLiveTx {
 		Fatal(t, "hello frame 불일치: ", hello)
 	}
 
@@ -295,7 +295,7 @@ func TestOrcaFeedLiveDispatch(t *testing.T) {
 		Fatal(t, "inner_index 시퀀스에 구멍: max=", maxInner, " count=", len(seen))
 	}
 	// top-level value transfer가 첫 이벤트
-	var topLevel *orcafeed.TransferRecord
+	var topLevel *orcanitrofeed.TransferRecord
 	for i := range msg3.Transfers {
 		if msg3.Transfers[i].Depth == 0 {
 			topLevel = &msg3.Transfers[i]
@@ -316,16 +316,16 @@ func TestOrcaFeedLiveDispatch(t *testing.T) {
 }
 
 // hash 스킴: state 전진(advanceStateUpToBlock) 경로
-func TestOrcaFeedSweep(t *testing.T) {
-	testOrcaFeedSweep(t, rawdb.HashScheme)
+func TestOrcaNitroFeedSweep(t *testing.T) {
+	testOrcaNitroFeedSweep(t, rawdb.HashScheme)
 }
 
 // path archive 스킴 (Titan 프로필): HistoricReader 블록별 직접 실행 경로
-func TestOrcaFeedSweepPathArchive(t *testing.T) {
-	testOrcaFeedSweep(t, rawdb.PathScheme)
+func TestOrcaNitroFeedSweepPathArchive(t *testing.T) {
+	testOrcaNitroFeedSweep(t, rawdb.PathScheme)
 }
 
-func testOrcaFeedSweep(t *testing.T, scheme string) {
+func testOrcaNitroFeedSweep(t *testing.T, scheme string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

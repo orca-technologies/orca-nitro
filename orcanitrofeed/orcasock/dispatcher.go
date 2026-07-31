@@ -10,7 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/tinylib/msgp/msgp"
 
-	"github.com/offchainlabs/nitro/orcafeed"
+	"github.com/offchainlabs/nitro/orcanitrofeed"
 )
 
 const (
@@ -21,9 +21,9 @@ const (
 )
 
 type queuedMsg struct {
-	typ orcafeed.MsgType
+	typ orcanitrofeed.MsgType
 	seq uint64
-	msg orcafeed.SeqSetter
+	msg orcanitrofeed.SeqSetter
 }
 
 // msgRing — Enqueue(핫패스)와 writer 사이의 staging 원형 큐. 가득 차면 oldest를
@@ -120,7 +120,7 @@ type Dispatcher struct {
 	connWg   sync.WaitGroup // per-conn sender
 }
 
-func NewDispatcher(cfg *orcafeed.Config, mode string) (*Dispatcher, error) {
+func NewDispatcher(cfg *orcanitrofeed.Config, mode string) (*Dispatcher, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -166,7 +166,7 @@ func NewDispatcher(cfg *orcafeed.Config, mode string) (*Dispatcher, error) {
 
 // Enqueue는 seq를 부여해 staging에 넣는다. 논블로킹 — 가득 차면 oldest drop.
 // msg는 enqueue 이후 수정하면 안 된다 (writer가 비동기로 직렬화).
-func (d *Dispatcher) Enqueue(typ orcafeed.MsgType, msg orcafeed.SeqSetter) {
+func (d *Dispatcher) Enqueue(typ orcanitrofeed.MsgType, msg orcanitrofeed.SeqSetter) {
 	// PERF:LOCK
 	//   cost: hold~ns (push + signal)
 	//   note: 실행 핫패스 유일한 동기화 지점
@@ -188,7 +188,7 @@ func (d *Dispatcher) Enqueue(typ orcafeed.MsgType, msg orcafeed.SeqSetter) {
 	d.mu.Unlock()
 	d.stagingCond.Signal()
 	if shouldLog {
-		log.Warn("orcafeed: staging ring overflow, dropping oldest", "totalDropped", dropped)
+		log.Warn("orca-nitro-feed: staging ring overflow, dropping oldest", "totalDropped", dropped)
 	}
 }
 
@@ -199,8 +199,8 @@ func (d *Dispatcher) acceptLoop() {
 		if err != nil {
 			return // listener closed
 		}
-		hello := orcafeed.Hello{SchemaVersion: orcafeed.SchemaVersion, Mode: d.mode}
-		frame := encodeFrame(orcafeed.MsgHello, &hello)
+		hello := orcanitrofeed.Hello{SchemaVersion: orcanitrofeed.SchemaVersion, Mode: d.mode}
+		frame := encodeFrame(orcanitrofeed.MsgHello, &hello)
 		_ = conn.SetWriteDeadline(time.Now().Add(connWriteTimeout))
 		if _, err := conn.Write(frame); err != nil {
 			conn.Close()
@@ -281,7 +281,7 @@ func (d *Dispatcher) sendLoop(conn net.Conn) {
 			_ = conn.SetWriteDeadline(time.Now().Add(connWriteTimeout))
 			if _, err := conn.Write(f); err != nil {
 				// 로컬 클라이언트 전제 — 죽었거나 심하게 느린 연결은 정리 (재접속 시 replay)
-				log.Warn("orcafeed: dropping slow/dead client", "err", err)
+				log.Warn("orca-nitro-feed: dropping slow/dead client", "err", err)
 				return
 			}
 		}
@@ -289,13 +289,13 @@ func (d *Dispatcher) sendLoop(conn net.Conn) {
 }
 
 // encodeFrame: [u32 LE len][u8 type][payload]. 반환 버퍼는 retention log가 소유.
-func encodeFrame(typ orcafeed.MsgType, msg msgp.Marshaler) []byte {
+func encodeFrame(typ orcanitrofeed.MsgType, msg msgp.Marshaler) []byte {
 	buf := make([]byte, frameHeaderSize, frameHeaderSize+256)
 	buf[4] = byte(typ)
 	buf, err := msg.MarshalMsg(buf)
 	if err != nil {
 		// msgp 생성 코드는 인코딩 실패 경로가 사실상 없음 — 발생 시 스키마 버그
-		log.Error("orcafeed: marshal failed", "err", err)
+		log.Error("orca-nitro-feed: marshal failed", "err", err)
 		buf = buf[:frameHeaderSize]
 	}
 	// #nosec G115

@@ -29,7 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/triedb"
 	"github.com/ethereum/go-ethereum/triedb/hashdb"
 
-	"github.com/offchainlabs/nitro/orcafeed"
+	"github.com/offchainlabs/nitro/orcanitrofeed"
 	"github.com/offchainlabs/nitro/util"
 	"github.com/offchainlabs/nitro/util/arbmath"
 	"github.com/offchainlabs/nitro/util/stopwaiter"
@@ -128,7 +128,7 @@ type BlocksReExecutor struct {
 	success       chan struct{}
 
 	// orca sweep dispatch (옵션). sink는 worker 간 공유, observer는 worker별 생성.
-	orcaSink   orcafeed.Sink
+	orcaSink   orcanitrofeed.Sink
 	orcaRanges [][2]uint64 // dispatch 대상 원본 범위 (pre-state용 start-- 이전 값)
 
 	// path 스킴 archive (Titan 등): HistoricReader로 블록별 과거 state를 직접 열어
@@ -138,7 +138,7 @@ type BlocksReExecutor struct {
 }
 
 // SetOrcaSink — Start 이전 1회 주입. 설정 시 재실행 블록의 receipt·transfer를 dispatch한다.
-func (s *BlocksReExecutor) SetOrcaSink(sink orcafeed.Sink) {
+func (s *BlocksReExecutor) SetOrcaSink(sink orcanitrofeed.Sink) {
 	s.orcaSink = sink
 }
 
@@ -307,9 +307,9 @@ func (s *BlocksReExecutor) LaunchBlocksReExecution(ctx context.Context, startBlo
 	launched = true
 	s.LaunchThread(func(ctx context.Context) {
 		defer func() { s.done <- struct{}{} }()
-		var orcaObserver *orcafeed.SweepObserver
+		var orcaObserver *orcanitrofeed.SweepObserver
 		if s.orcaSink != nil {
-			orcaObserver = orcafeed.NewSweepObserver(s.orcaSink, s.orcaRanges)
+			orcaObserver = orcanitrofeed.NewSweepObserver(s.orcaSink, s.orcaRanges)
 		}
 		log.Info("Starting reexecution of blocks against historic state", "stateAt", start, "startBlock", start+1, "endBlock", currentBlock)
 		if err := s.advanceStateUpToBlock(ctx, startState, targetHeader, startHeader, release, orcaObserver); err != nil {
@@ -335,9 +335,9 @@ func (s *BlocksReExecutor) launchHistoricChunk(ctx context.Context, startBlock, 
 	}
 	s.LaunchThread(func(ctx context.Context) {
 		defer func() { s.done <- struct{}{} }()
-		var orcaObserver *orcafeed.SweepObserver
+		var orcaObserver *orcanitrofeed.SweepObserver
 		if s.orcaSink != nil {
-			orcaObserver = orcafeed.NewSweepObserver(s.orcaSink, s.orcaRanges)
+			orcaObserver = orcanitrofeed.NewSweepObserver(s.orcaSink, s.orcaRanges)
 		}
 		log.Info("Starting historic reexecution of blocks", "startBlock", start+1, "endBlock", currentBlock)
 		// statedb는 연속 블록에 걸쳐 재사용한다 — hash 경로의 AdvanceStateByBlock과
@@ -372,7 +372,7 @@ func (s *BlocksReExecutor) launchHistoricChunk(ctx context.Context, startBlock, 
 // reExecuteHistoricBlock — 블록 하나를 재실행하고 receipts root·gas 정합을 검증한다.
 // statedb가 nil이 아니면 (직전 블록의 post-state) 재사용하고, nil이면 부모 root에서 연다.
 // 반환값은 다음 블록에 물려줄 post-state.
-func (s *BlocksReExecutor) reExecuteHistoricBlock(blockNum uint64, statedb *state.StateDB, orcaObserver *orcafeed.SweepObserver) (*state.StateDB, error) {
+func (s *BlocksReExecutor) reExecuteHistoricBlock(blockNum uint64, statedb *state.StateDB, orcaObserver *orcanitrofeed.SweepObserver) (*state.StateDB, error) {
 	block := s.blockchain.GetBlockByNumber(blockNum)
 	if block == nil {
 		return nil, fmt.Errorf("block %d not found", blockNum)
@@ -512,7 +512,7 @@ func (s *BlocksReExecutor) commitStateAndVerify(statedb *state.StateDB, expected
 	return sdb, arbitrum.NoopStateRelease, err
 }
 
-func (s *BlocksReExecutor) advanceStateUpToBlock(ctx context.Context, state *state.StateDB, targetHeader *types.Header, lastAvailableHeader *types.Header, lastRelease arbitrum.StateReleaseFunc, orcaObserver *orcafeed.SweepObserver) error {
+func (s *BlocksReExecutor) advanceStateUpToBlock(ctx context.Context, state *state.StateDB, targetHeader *types.Header, lastAvailableHeader *types.Header, lastRelease arbitrum.StateReleaseFunc, orcaObserver *orcanitrofeed.SweepObserver) error {
 	targetBlockNumber := targetHeader.Number.Uint64()
 	blockToRecreate := lastAvailableHeader.Number.Uint64() + 1
 	prevHash := lastAvailableHeader.Hash()

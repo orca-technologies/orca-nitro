@@ -26,7 +26,7 @@ import (
 	"github.com/offchainlabs/nitro/arbos/l1pricing"
 	"github.com/offchainlabs/nitro/arbos/l2pricing"
 	"github.com/offchainlabs/nitro/arbos/util"
-	"github.com/offchainlabs/nitro/orcafeed"
+	"github.com/offchainlabs/nitro/orcanitrofeed"
 	"github.com/offchainlabs/nitro/util/arbmath"
 )
 
@@ -301,7 +301,7 @@ func ProduceBlock(
 	isMsgForPrefetch bool,
 	runCtx *core.MessageRunContext,
 	exposeMultiGas bool,
-	observer *orcafeed.BlockObserver,
+	observer *orcanitrofeed.BlockObserver,
 ) (*types.Block, *state.StateDB, types.Receipts, error) {
 	chainConfig := chainContext.Config()
 	lastArbosVersion := types.DeserializeHeaderExtraInformation(lastBlockHeader).ArbOSFormatVersion
@@ -329,7 +329,7 @@ func ProduceBlockAdvanced(
 	runCtx *core.MessageRunContext,
 	exposeMultiGas bool,
 	addressChecker state.AddressChecker,
-	observer *orcafeed.BlockObserver,
+	observer *orcanitrofeed.BlockObserver,
 ) (*types.Block, *state.StateDB, types.Receipts, error) {
 
 	arbState, err := arbosState.OpenSystemArbosState(statedb, nil, false)

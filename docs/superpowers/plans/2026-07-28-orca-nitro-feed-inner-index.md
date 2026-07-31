@@ -1,8 +1,8 @@
-# orcafeed inner_index — 로그·transfer 실행 순서 관측 Implementation Plan
+# orca-nitro-feed inner_index — 로그·transfer 실행 순서 관측 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** orcafeed가 로그 방출과 native transfer의 **실제 실행 순서**를 tx-local `inner_index`로 관측해 wire에 실어 보낸다.
+**Goal:** orca-nitro-feed가 로그 방출과 native transfer의 **실제 실행 순서**를 tx-local `inner_index`로 관측해 wire에 실어 보낸다.
 
 **Architecture:** collector가 이미 등록한 tracing 훅에 `OnLog`를 추가해, 로그와 transfer를 **하나의 방출 시퀀스**로 기록한다. tx마다 0부터 증가하는 `inner_index`를 부여하고, revert된 frame의 항목은 기존 transfer와 동일하게 마킹한다. 로그는 revert되지 않은 것만 내보내며, 그 결과가 `receipt.Logs`와 개수·내용이 일치하는지 테스트로 고정한다.
 
@@ -15,7 +15,7 @@
 - `OnOpcode` 훅 등록 금지 (EVM 인터프리터 핫루프 오염).
 - 핫패스 무할당 지향 — collector 버퍼는 `Reset()` 후 재사용 (capacity 유지).
 - msgpack **array-mode**(`//msgp:tuple`) — 필드 **순서가 계약**이다. 추가는 반드시 struct 끝에.
-- 테스트 실행은 compile과 분리: `go test --no-run` 없이 Go는 `go build` 후 `go test`. 단위 테스트는 수 초, system_tests는 단건 실행(`-run TestOrcaFeed -v`, ~2분).
+- 테스트 실행은 compile과 분리: `go test --no-run` 없이 Go는 `go build` 후 `go test`. 단위 테스트는 수 초, system_tests는 단건 실행(`-run TestOrcaNitroFeed -v`, ~2분).
 - 커밋 메시지 끝: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`
 
 ## 조사로 확정된 사실 (재확인 불요)
@@ -23,25 +23,25 @@
 - `OnLog` 시그니처: `LogHook = func(log *types.Log)` (`go-ethereum/core/tracing/hooks.go:194-195`), 필드명 `OnLog` (`:234`).
 - 발화 지점: `go-ethereum/core/state/statedb_hooked.go:276-277` — **hooked statedb를 거칠 때만** 발화한다. `arbos/block_processor.go`가 observer 활성 시 `state.NewHookedState(...)`로 감싸므로 이미 조건 충족.
 - `OnLog`은 `AddLog` 시점에 발화하므로 **나중에 revert되는 로그도 발화**한다. 따라서 revert 마킹 후 필터링이 필요하다.
-- collector 현재 상태: `orcafeed/collector.go` — `OnTxStart/OnTxEnd/OnEnter/OnExit/OnBalanceChange` 등록, `records []TransferRecord`, `frames []frameMark{depth, startIdx}`, `pending *pendingSub`.
-- observer 현재 상태: `orcafeed/observer.go` `newReceiptMsg(...)`가 `receipt.Logs`를 그대로 `LogRecord`로 변환한다.
+- collector 현재 상태: `orcanitrofeed/collector.go` — `OnTxStart/OnTxEnd/OnEnter/OnExit/OnBalanceChange` 등록, `records []TransferRecord`, `frames []frameMark{depth, startIdx}`, `pending *pendingSub`.
+- observer 현재 상태: `orcanitrofeed/observer.go` `newReceiptMsg(...)`가 `receipt.Logs`를 그대로 `LogRecord`로 변환한다.
 
 ---
 
 ### Task 1: 스키마에 inner_index 추가
 
 **Files:**
-- Modify: `orcafeed/schema.go` (`TransferRecord`, `LogRecord`)
-- Regenerate: `orcafeed/schema_gen.go` (`go generate ./orcafeed`)
-- Modify: `orcafeed/golden_test.go` (고정 샘플에 값 추가)
-- Regenerate: `orcafeed/testdata/golden_v1_*.bin`
+- Modify: `orcanitrofeed/schema.go` (`TransferRecord`, `LogRecord`)
+- Regenerate: `orcanitrofeed/schema_gen.go` (`go generate ./orca-nitro-feed`)
+- Modify: `orcanitrofeed/golden_test.go` (고정 샘플에 값 추가)
+- Regenerate: `orcanitrofeed/testdata/golden_v1_*.bin`
 
 **Interfaces:**
 - Produces: `TransferRecord.InnerIndex uint16`, `LogRecord.InnerIndex uint16` — tx 안에서 이벤트가 방출된 순번 (0부터). Task 2·3이 채운다.
 
 - [ ] **Step 1: 스키마에 필드 추가**
 
-`orcafeed/schema.go`에서 두 struct 끝에 필드를 추가한다 (array-mode라 순서가 계약 — 반드시 끝에).
+`orcanitrofeed/schema.go`에서 두 struct 끝에 필드를 추가한다 (array-mode라 순서가 계약 — 반드시 끝에).
 
 ```go
 //msgp:tuple TransferRecord
@@ -72,13 +72,13 @@ type LogRecord struct {
 - [ ] **Step 2: 코드젠 재실행**
 
 ```bash
-cd orcafeed && PATH="$(go env GOPATH)/bin:$PATH" go generate . && cd .. && go build ./orcafeed/
+cd orca-nitro-feed && PATH="$(go env GOPATH)/bin:$PATH" go generate . && cd .. && go build ./orcanitrofeed/
 ```
 Expected: 에러 없음. `msgp`가 없으면 `go install github.com/tinylib/msgp` 선행.
 
 - [ ] **Step 3: golden 샘플에 값 넣기**
 
-`orcafeed/golden_test.go`의 `goldenMessages()`에서 receipt 샘플을 수정한다.
+`orcanitrofeed/golden_test.go`의 `goldenMessages()`에서 receipt 샘플을 수정한다.
 
 ```go
 			Logs: []LogRecord{{Address: addr(0x03), Topics: [][32]byte{hash(0xcc)}, Data: []byte{0x01}, InnerIndex: 1}},
@@ -93,15 +93,15 @@ Expected: 에러 없음. `msgp`가 없으면 `go install github.com/tinylib/msgp
 - [ ] **Step 4: golden fixture 재생성 후 통과 확인**
 
 ```bash
-go test ./orcafeed/ -run TestGolden -update && go test ./orcafeed/ -run TestGolden -v
+go test ./orcanitrofeed/ -run TestGolden -update && go test ./orcanitrofeed/ -run TestGolden -v
 ```
 Expected: PASS (5개 서브테스트)
 
 - [ ] **Step 5: 커밋**
 
 ```bash
-git add orcafeed
-git commit -m "feat(orcafeed): TransferRecord·LogRecord에 inner_index 필드
+git add orca-nitro-feed
+git commit -m "feat(orca-nitro-feed): TransferRecord·LogRecord에 inner_index 필드
 
 tx 안 방출 순번 — 로그와 transfer가 공유하는 단일 시퀀스.
 
@@ -113,8 +113,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ### Task 2: collector가 로그를 순서와 함께 수집
 
 **Files:**
-- Modify: `orcafeed/collector.go`
-- Test: `orcafeed/collector_test.go`
+- Modify: `orcanitrofeed/collector.go`
+- Test: `orcanitrofeed/collector_test.go`
 
 **Interfaces:**
 - Consumes: `TransferRecord.InnerIndex`, `LogRecord.InnerIndex` (Task 1)
@@ -125,7 +125,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: 실패하는 테스트 작성**
 
-`orcafeed/collector_test.go` 끝에 추가한다.
+`orcanitrofeed/collector_test.go` 끝에 추가한다.
 
 ```go
 func TestCollectorInterleavesLogsAndTransfers(t *testing.T) {
@@ -197,13 +197,13 @@ func TestCollectorResetClearsLogs(t *testing.T) {
 - [ ] **Step 2: 실패 확인**
 
 ```bash
-go test ./orcafeed/ -run TestCollector 2>&1 | tail -5
+go test ./orcanitrofeed/ -run TestCollector 2>&1 | tail -5
 ```
 Expected: FAIL — `c.DrainLogs undefined`, `h.OnLog` nil 역참조
 
 - [ ] **Step 3: collector 구현**
 
-`orcafeed/collector.go`를 수정한다.
+`orcanitrofeed/collector.go`를 수정한다.
 
 struct에 로그 시퀀스 상태를 추가:
 
@@ -343,15 +343,15 @@ func (c *Collector) onExit(_ int, _ []byte, _ uint64, _ error, reverted bool) {
 - [ ] **Step 4: 통과 확인**
 
 ```bash
-go test ./orcafeed/ -run TestCollector -v 2>&1 | tail -12
+go test ./orcanitrofeed/ -run TestCollector -v 2>&1 | tail -12
 ```
 Expected: 기존 7개 + 신규 3개 전부 PASS
 
 - [ ] **Step 5: 커밋**
 
 ```bash
-git add orcafeed
-git commit -m "feat(orcafeed): collector가 OnLog로 로그·transfer 실행 순서 관측
+git add orca-nitro-feed
+git commit -m "feat(orca-nitro-feed): collector가 OnLog로 로그·transfer 실행 순서 관측
 
 로그와 transfer를 하나의 tx-local 시퀀스(inner_index)로 기록한다. revert된
 frame의 로그는 receipt에 남지 않으므로 버리고, transfer는 플래그만 세운다.
@@ -365,8 +365,8 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ### Task 3: observer가 collector 로그를 내보내고 receipt와 대조
 
 **Files:**
-- Modify: `orcafeed/observer.go` (`buildReceiptMsg`, `newReceiptMsg`)
-- Test: `orcafeed/observer_test.go`
+- Modify: `orcanitrofeed/observer.go` (`buildReceiptMsg`, `newReceiptMsg`)
+- Test: `orcanitrofeed/observer_test.go`
 
 **Interfaces:**
 - Consumes: `Collector.Drain()`, `Collector.DrainLogs()` (Task 2)
@@ -374,7 +374,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: 실패하는 테스트 작성**
 
-`orcafeed/observer_test.go` 끝에 추가한다.
+`orcanitrofeed/observer_test.go` 끝에 추가한다.
 
 ```go
 func TestObserverEmitsCollectorLogsWithInnerIndex(t *testing.T) {
@@ -426,13 +426,13 @@ func TestObserverFallsBackWhenLogCountMismatches(t *testing.T) {
 - [ ] **Step 2: 실패 확인**
 
 ```bash
-go test ./orcafeed/ -run TestObserver 2>&1 | tail -5
+go test ./orcanitrofeed/ -run TestObserver 2>&1 | tail -5
 ```
 Expected: FAIL — `msg.Logs[0].InnerIndex`가 0 (collector 로그를 안 쓰고 있음)
 
 - [ ] **Step 3: observer 구현**
 
-`orcafeed/observer.go`의 `buildReceiptMsg`가 collector 로그를 넘기도록 수정한다.
+`orcanitrofeed/observer.go`의 `buildReceiptMsg`가 collector 로그를 넘기도록 수정한다.
 
 ```go
 func (o *BlockObserver) buildReceiptMsg(tx *types.Transaction, sender common.Address, receipt *types.Receipt, statedb *state.StateDB, txIndex int) *ReceiptMsg {
@@ -474,7 +474,7 @@ func newReceiptMsg(blockNumber, l2Timestamp uint64, txIndex int, tx *types.Trans
 	if len(logs) == len(receipt.Logs) {
 		msg.Logs = logs
 	} else {
-		log.Warn("orcafeed: collector log count mismatch, falling back to receipt logs",
+		log.Warn("orca-nitro-feed: collector log count mismatch, falling back to receipt logs",
 			"collector", len(logs), "receipt", len(receipt.Logs), "tx", tx.Hash())
 		if len(receipt.Logs) > 0 {
 			msg.Logs = make([]LogRecord, len(receipt.Logs))
@@ -489,9 +489,9 @@ func newReceiptMsg(blockNumber, l2Timestamp uint64, txIndex int, tx *types.Trans
 	}
 ```
 
-`orcafeed/observer.go` import에 `"github.com/ethereum/go-ethereum/log"`를 추가한다.
+`orcanitrofeed/observer.go` import에 `"github.com/ethereum/go-ethereum/log"`를 추가한다.
 
-`orcafeed/sweep_observer.go`의 `newReceiptMsg` 호출도 새 시그니처에 맞춘다 — collector 로그를 `txCapture`에 함께 담는다.
+`orcanitrofeed/sweep_observer.go`의 `newReceiptMsg` 호출도 새 시그니처에 맞춘다 — collector 로그를 `txCapture`에 함께 담는다.
 
 ```go
 type txCapture struct {
@@ -534,15 +534,15 @@ type txCapture struct {
 - [ ] **Step 4: 통과 확인**
 
 ```bash
-go build ./orcafeed/ && go test ./orcafeed/... -v 2>&1 | grep -E "^--- |^(ok|FAIL)" | tail -20
+go build ./orcanitrofeed/ && go test ./orcanitrofeed/... -v 2>&1 | grep -E "^--- |^(ok|FAIL)" | tail -20
 ```
 Expected: 전부 PASS
 
 - [ ] **Step 5: 커밋**
 
 ```bash
-git add orcafeed
-git commit -m "feat(orcafeed): ReceiptMsg 로그를 collector 시퀀스에서 (inner_index 보유)
+git add orca-nitro-feed
+git commit -m "feat(orca-nitro-feed): ReceiptMsg 로그를 collector 시퀀스에서 (inner_index 보유)
 
 receipt.Logs와 개수가 어긋나면 경고 후 폴백해 데이터는 지킨다.
 
@@ -554,14 +554,14 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ### Task 4: 실제 체인에서 interleave 검증 (system test)
 
 **Files:**
-- Modify: `system_tests/orcafeed_test.go`
+- Modify: `system_tests/orcanitrofeed_test.go`
 
 **Interfaces:**
 - Consumes: Task 1–3 전부
 
 - [ ] **Step 1: 실패하는 테스트 작성**
 
-`system_tests/orcafeed_test.go`의 `TestOrcaFeedLiveDispatch` 안, `msg3` 검증 뒤에 추가한다.
+`system_tests/orcanitrofeed_test.go`의 `TestOrcaNitroFeedLiveDispatch` 안, `msg3` 검증 뒤에 추가한다.
 
 ```go
 	// (4) 로그·transfer가 하나의 실행 순서 시퀀스를 공유하는지
@@ -593,7 +593,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 		Fatal(t, "inner_index 시퀀스에 구멍: max=", maxInner, " count=", len(seen))
 	}
 	// top-level value transfer가 첫 이벤트
-	var topLevel *orcafeed.TransferRecord
+	var topLevel *orcanitrofeed.TransferRecord
 	for i := range msg3.Transfers {
 		if msg3.Transfers[i].Depth == 0 {
 			topLevel = &msg3.Transfers[i]
@@ -608,13 +608,13 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ```bash
 go test -buildvcs=false -tags ckzg -c -o /tmp/systest ./system_tests/
-cd system_tests && /tmp/systest -test.run TestOrcaFeedLiveDispatch -test.v 2>&1 | grep -E "^--- |FAIL"
+cd system_tests && /tmp/systest -test.run TestOrcaNitroFeedLiveDispatch -test.v 2>&1 | grep -E "^--- |FAIL"
 ```
 Expected: 이 시점엔 Task 1–3이 이미 되어 있으므로 PASS. 만약 FAIL이면 inner_index 배선 누락이므로 Task 2·3을 점검한다.
 
 - [ ] **Step 3: sweep 경로도 같은 불변식 확인**
 
-`testOrcaFeedSweep`의 `msg3` 검증 뒤에 추가한다.
+`testOrcaNitroFeedSweep`의 `msg3` 검증 뒤에 추가한다.
 
 ```go
 	if len(msg3.Logs) > 0 {
@@ -632,15 +632,15 @@ Expected: 이 시점엔 Task 1–3이 이미 되어 있으므로 PASS. 만약 FA
 
 ```bash
 go test -buildvcs=false -tags ckzg -c -o /tmp/systest ./system_tests/
-cd system_tests && /tmp/systest -test.run TestOrcaFeed -test.v 2>&1 | grep -E "^--- |^(PASS|FAIL)"
+cd system_tests && /tmp/systest -test.run TestOrcaNitroFeed -test.v 2>&1 | grep -E "^--- |^(PASS|FAIL)"
 ```
-Expected: `TestOrcaFeedLiveDispatch`, `TestOrcaFeedSweep`, `TestOrcaFeedSweepPathArchive` 전부 PASS
+Expected: `TestOrcaNitroFeedLiveDispatch`, `TestOrcaNitroFeedSweep`, `TestOrcaNitroFeedSweepPathArchive` 전부 PASS
 
 - [ ] **Step 5: 커밋**
 
 ```bash
-git add system_tests/orcafeed_test.go
-git commit -m "test(orcafeed): 로그·transfer inner_index 시퀀스 불변식 검증
+git add system_tests/orcanitrofeed_test.go
+git commit -m "test(orca-nitro-feed): 로그·transfer inner_index 시퀀스 불변식 검증
 
 실제 체인에서 중복 없이 0부터 촘촘하고, top-level transfer가 0인지 확인.
 
@@ -652,9 +652,9 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ### Task 5: Rust 디코더 동기화
 
 **Files:**
-- Modify: `dora-shared/como_feat_evm-platform/orcafeed-types/src/schema.rs`
-- Copy: `orcafeed/testdata/golden_v1_*.bin` → `dora-shared/como_feat_evm-platform/orcafeed-types/tests/golden/`
-- Modify: `dora-shared/como_feat_evm-platform/orcafeed-types/tests/golden_tests.rs`
+- Modify: `dora-shared/como_feat_evm-platform/orca-nitro-feed-types/src/schema.rs`
+- Copy: `orcanitrofeed/testdata/golden_v1_*.bin` → `dora-shared/como_feat_evm-platform/orca-nitro-feed-types/tests/golden/`
+- Modify: `dora-shared/como_feat_evm-platform/orca-nitro-feed-types/tests/golden_tests.rs`
 
 **Interfaces:**
 - Consumes: Task 1의 wire 스키마
@@ -662,7 +662,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Rust 스키마에 필드 추가**
 
-`orcafeed-types/src/schema.rs`의 두 struct 끝에 추가한다 (순서 = Go와 동일해야 함).
+`orca-nitro-feed-types/src/schema.rs`의 두 struct 끝에 추가한다 (순서 = Go와 동일해야 함).
 
 ```rust
 pub struct TransferRecord {
@@ -689,13 +689,13 @@ pub struct LogRecord {
 - [ ] **Step 2: golden fixture 동기화**
 
 ```bash
-cp /Users/como/workspace/Orca-Technologies/worktrees/orca-nitro/como_feat_receipt-dispatch/orcafeed/testdata/golden_v1_*.bin \
-   /Users/como/workspace/Orca-Technologies/worktrees/dora-shared/como_feat_evm-platform/orcafeed-types/tests/golden/
+cp /Users/como/workspace/Orca-Technologies/worktrees/orca-nitro/como_feat_receipt-dispatch/orcanitrofeed/testdata/golden_v1_*.bin \
+   /Users/como/workspace/Orca-Technologies/worktrees/dora-shared/como_feat_evm-platform/orca-nitro-feed-types/tests/golden/
 ```
 
 - [ ] **Step 3: 기대값 추가**
 
-`orcafeed-types/tests/golden_tests.rs`의 `decodes_receipt_full`에서 로그·transfer 검증에 추가한다.
+`orca-nitro-feed-types/tests/golden_tests.rs`의 `decodes_receipt_full`에서 로그·transfer 검증에 추가한다.
 
 ```rust
     assert_eq!(logs[0].inner_index, 1);
@@ -707,7 +707,7 @@ cp /Users/como/workspace/Orca-Technologies/worktrees/orca-nitro/como_feat_receip
 
 ```bash
 cd /Users/como/workspace/Orca-Technologies/worktrees/dora-shared/como_feat_evm-platform
-cargo test --no-run -p orcafeed-types && cargo test -p orcafeed-types 2>&1 | grep "test result"
+cargo test --no-run -p orca-nitro-feed-types && cargo test -p orca-nitro-feed-types 2>&1 | grep "test result"
 ```
 Expected: 4 passed
 
@@ -715,8 +715,8 @@ Expected: 4 passed
 
 ```bash
 cd /Users/como/workspace/Orca-Technologies/worktrees/dora-shared/como_feat_evm-platform
-git add orcafeed-types
-git commit -m "feat(orcafeed-types): inner_index 필드 + golden 동기화
+git add orca-nitro-feed-types
+git commit -m "feat(orca-nitro-feed-types): inner_index 필드 + golden 동기화
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 git push

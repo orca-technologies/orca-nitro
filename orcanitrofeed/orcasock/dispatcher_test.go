@@ -1,7 +1,7 @@
 package orcasock
 
 import (
-	"github.com/offchainlabs/nitro/orcafeed"
+	"github.com/offchainlabs/nitro/orcanitrofeed"
 
 	"encoding/binary"
 	"io"
@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func readFrame(t *testing.T, conn net.Conn) (orcafeed.MsgType, []byte) {
+func readFrame(t *testing.T, conn net.Conn) (orcanitrofeed.MsgType, []byte) {
 	t.Helper()
 	header := make([]byte, 5)
 	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
@@ -25,7 +25,7 @@ func readFrame(t *testing.T, conn net.Conn) (orcafeed.MsgType, []byte) {
 	if _, err := io.ReadFull(conn, payload); err != nil {
 		t.Fatalf("frame payload: %v", err)
 	}
-	return orcafeed.MsgType(header[4]), payload
+	return orcanitrofeed.MsgType(header[4]), payload
 }
 
 // t.TempDir()는 테스트명이 들어가 macOS unix socket 경로 한계(104B)를 넘는다
@@ -42,11 +42,11 @@ func mustTempDir(t *testing.T) string {
 func newTestDispatcher(t *testing.T, bufferSize int) (*Dispatcher, string) {
 	t.Helper()
 	sock := filepath.Join(mustTempDir(t), "orca.sock")
-	cfg := orcafeed.DefaultConfig
+	cfg := orcanitrofeed.DefaultConfig
 	cfg.Enable = true
 	cfg.SocketPath = sock
 	cfg.BufferSize = bufferSize
-	d, err := NewDispatcher(&cfg, orcafeed.ModeLiveTx)
+	d, err := NewDispatcher(&cfg, orcanitrofeed.ModeLiveTx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,25 +64,25 @@ func TestDispatcherHelloAndRoundtrip(t *testing.T) {
 	defer conn.Close()
 
 	typ, payload := readFrame(t, conn)
-	if typ != orcafeed.MsgHello {
+	if typ != orcanitrofeed.MsgHello {
 		t.Fatalf("첫 프레임이 hello가 아님: %d", typ)
 	}
-	var hello orcafeed.Hello
+	var hello orcanitrofeed.Hello
 	if _, err := hello.UnmarshalMsg(payload); err != nil {
 		t.Fatal(err)
 	}
-	if hello.SchemaVersion != orcafeed.SchemaVersion || hello.Mode != orcafeed.ModeLiveTx {
+	if hello.SchemaVersion != orcanitrofeed.SchemaVersion || hello.Mode != orcanitrofeed.ModeLiveTx {
 		t.Fatalf("hello 불일치: %+v", hello)
 	}
 
-	sent := &orcafeed.ReceiptMsg{BlockNumber: 42, TxIndex: 1, Status: 1}
-	d.Enqueue(orcafeed.MsgReceipt, sent)
+	sent := &orcanitrofeed.ReceiptMsg{BlockNumber: 42, TxIndex: 1, Status: 1}
+	d.Enqueue(orcanitrofeed.MsgReceipt, sent)
 
 	typ, payload = readFrame(t, conn)
-	if typ != orcafeed.MsgReceipt {
+	if typ != orcanitrofeed.MsgReceipt {
 		t.Fatalf("receipt 프레임 아님: %d", typ)
 	}
-	var got orcafeed.ReceiptMsg
+	var got orcanitrofeed.ReceiptMsg
 	if _, err := got.UnmarshalMsg(payload); err != nil {
 		t.Fatal(err)
 	}
@@ -90,13 +90,13 @@ func TestDispatcherHelloAndRoundtrip(t *testing.T) {
 		t.Fatalf("receipt 불일치 (첫 seq는 0): %+v", got)
 	}
 
-	d.Enqueue(orcafeed.MsgBlockSeal, &orcafeed.BlockSealMsg{BlockNumber: 42})
+	d.Enqueue(orcanitrofeed.MsgBlockSeal, &orcanitrofeed.BlockSealMsg{BlockNumber: 42})
 	typ, payload = readFrame(t, conn)
-	var seal orcafeed.BlockSealMsg
+	var seal orcanitrofeed.BlockSealMsg
 	if _, err := seal.UnmarshalMsg(payload); err != nil {
 		t.Fatal(err)
 	}
-	if typ != orcafeed.MsgBlockSeal || seal.Seq != 1 {
+	if typ != orcanitrofeed.MsgBlockSeal || seal.Seq != 1 {
 		t.Fatalf("seq 단조증가 실패: typ=%d seq=%d", typ, seal.Seq)
 	}
 }
@@ -106,7 +106,7 @@ func TestDispatcherEnqueueWithoutClientDoesNotBlock(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < 1000; i++ {
-			d.Enqueue(orcafeed.MsgReceipt, &orcafeed.ReceiptMsg{BlockNumber: uint64(i)})
+			d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.ReceiptMsg{BlockNumber: uint64(i)})
 		}
 		close(done)
 	}()
@@ -150,7 +150,7 @@ func TestDispatcherRetentionReplay(t *testing.T) {
 	d, sock := newTestDispatcher(t, 4096)
 
 	for i := 0; i < 100; i++ {
-		d.Enqueue(orcafeed.MsgReceipt, &orcafeed.ReceiptMsg{BlockNumber: uint64(i)})
+		d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.ReceiptMsg{BlockNumber: uint64(i)})
 	}
 	time.Sleep(200 * time.Millisecond) // writer가 staging → retention 옮길 시간
 
@@ -160,15 +160,15 @@ func TestDispatcherRetentionReplay(t *testing.T) {
 	}
 	defer conn.Close()
 	typ, _ := readFrame(t, conn)
-	if typ != orcafeed.MsgHello {
+	if typ != orcanitrofeed.MsgHello {
 		t.Fatalf("hello 먼저: %d", typ)
 	}
 	for i := 0; i < 100; i++ {
 		typ, payload := readFrame(t, conn)
-		if typ != orcafeed.MsgReceipt {
+		if typ != orcanitrofeed.MsgReceipt {
 			t.Fatalf("receipt 아님: %d", typ)
 		}
-		var m orcafeed.ReceiptMsg
+		var m orcanitrofeed.ReceiptMsg
 		if _, err := m.UnmarshalMsg(payload); err != nil {
 			t.Fatal(err)
 		}
@@ -178,9 +178,9 @@ func TestDispatcherRetentionReplay(t *testing.T) {
 	}
 
 	// 이후 live 이어붙임
-	d.Enqueue(orcafeed.MsgReceipt, &orcafeed.ReceiptMsg{BlockNumber: 100})
+	d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.ReceiptMsg{BlockNumber: 100})
 	_, payload := readFrame(t, conn)
-	var m orcafeed.ReceiptMsg
+	var m orcanitrofeed.ReceiptMsg
 	if _, err := m.UnmarshalMsg(payload); err != nil {
 		t.Fatal(err)
 	}
@@ -192,12 +192,12 @@ func TestDispatcherRetentionReplay(t *testing.T) {
 // 바이트 예산 초과 시 oldest 제거 → 재접속 클라이언트는 seq gap으로 감지
 func TestDispatcherByteBudgetEviction(t *testing.T) {
 	sock := filepath.Join(mustTempDir(t), "orca.sock")
-	cfg := orcafeed.DefaultConfig
+	cfg := orcanitrofeed.DefaultConfig
 	cfg.Enable = true
 	cfg.SocketPath = sock
 	cfg.BufferSize = 4096
 	cfg.BufferBytes = 4096 // 아주 작은 예산 — 대부분 evict
-	d, err := NewDispatcher(&cfg, orcafeed.ModeLiveTx)
+	d, err := NewDispatcher(&cfg, orcanitrofeed.ModeLiveTx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestDispatcherByteBudgetEviction(t *testing.T) {
 
 	payload := make([]byte, 200)
 	for i := 0; i < 200; i++ {
-		d.Enqueue(orcafeed.MsgReceipt, &orcafeed.ReceiptMsg{BlockNumber: uint64(i), Calldata: payload})
+		d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.ReceiptMsg{BlockNumber: uint64(i), Calldata: payload})
 	}
 	time.Sleep(300 * time.Millisecond)
 
@@ -215,11 +215,11 @@ func TestDispatcherByteBudgetEviction(t *testing.T) {
 	}
 	defer conn.Close()
 	typ, _ := readFrame(t, conn)
-	if typ != orcafeed.MsgHello {
+	if typ != orcanitrofeed.MsgHello {
 		t.Fatalf("hello 먼저: %d", typ)
 	}
 	_, p := readFrame(t, conn)
-	var first orcafeed.ReceiptMsg
+	var first orcanitrofeed.ReceiptMsg
 	if _, err := first.UnmarshalMsg(p); err != nil {
 		t.Fatal(err)
 	}

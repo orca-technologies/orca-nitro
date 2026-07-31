@@ -1,4 +1,4 @@
-package orcafeed
+package orcanitrofeed
 
 import (
 	"errors"
@@ -35,16 +35,16 @@ func (c *Config) Validate() error {
 		return nil
 	}
 	if c.SocketPath == "" {
-		return errors.New("orca-feed.socket-path required when enabled")
+		return errors.New("orcanitrofeed.socket-path required when enabled")
 	}
 	if c.Mode != "tx" && c.Mode != "block" {
-		return errors.New("orca-feed.mode must be tx or block")
+		return errors.New("orcanitrofeed.mode must be tx or block")
 	}
 	if c.BufferSize <= 0 {
-		return errors.New("orca-feed.buffer-size must be positive")
+		return errors.New("orcanitrofeed.buffer-size must be positive")
 	}
 	if c.BufferBytes <= 0 {
-		return errors.New("orca-feed.buffer-bytes must be positive")
+		return errors.New("orcanitrofeed.buffer-bytes must be positive")
 	}
 	return nil
 }

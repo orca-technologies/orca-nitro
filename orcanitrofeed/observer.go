@@ -1,4 +1,4 @@
-package orcafeed
+package orcanitrofeed
 
 import (
 	"time"
@@ -161,7 +161,7 @@ func newReceiptMsg(blockNumber, l2Timestamp, l1BlockNumber uint64, txIndex int, 
 	if len(logs) == len(receipt.Logs) {
 		msg.Logs = logs
 	} else {
-		log.Warn("orcafeed: collector log count mismatch, falling back to receipt logs",
+		log.Warn("orca-nitro-feed: collector log count mismatch, falling back to receipt logs",
 			"collector", len(logs), "receipt", len(receipt.Logs), "tx", tx.Hash())
 		if len(receipt.Logs) > 0 {
 			msg.Logs = make([]LogRecord, len(receipt.Logs))

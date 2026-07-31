@@ -54,8 +54,8 @@ import (
 	"github.com/offchainlabs/nitro/execution/gethexec"
 	_ "github.com/offchainlabs/nitro/execution/nodeinterface"
 	"github.com/offchainlabs/nitro/execution_consensus"
-	"github.com/offchainlabs/nitro/orcafeed"
-	"github.com/offchainlabs/nitro/orcafeed/orcasock"
+	"github.com/offchainlabs/nitro/orcanitrofeed"
+	"github.com/offchainlabs/nitro/orcanitrofeed/orcasock"
 	"github.com/offchainlabs/nitro/solgen/go/bridgegen"
 	"github.com/offchainlabs/nitro/solgen/go/precompilesgen"
 	"github.com/offchainlabs/nitro/solgen/go/rollupgen"
@@ -485,8 +485,8 @@ func mainImpl() int {
 		}
 
 		// orca sweep dispatch: 재실행 블록의 receipt·transfer를 unix socket으로 전달
-		if nodeConfig.Execution.OrcaFeed.Enable {
-			sweepDispatcher, err := orcasock.NewDispatcher(&nodeConfig.Execution.OrcaFeed, orcafeed.ModeSweep)
+		if nodeConfig.Execution.OrcaNitroFeed.Enable {
+			sweepDispatcher, err := orcasock.NewDispatcher(&nodeConfig.Execution.OrcaNitroFeed, orcanitrofeed.ModeSweep)
 			if err != nil {
 				log.Error("error initializing orca sweep dispatcher", "err", err)
 				return 1

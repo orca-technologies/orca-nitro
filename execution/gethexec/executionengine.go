@@ -52,7 +52,7 @@ import (
 	"github.com/offchainlabs/nitro/execution"
 	"github.com/offchainlabs/nitro/execution/gethexec/addressfilter"
 	"github.com/offchainlabs/nitro/execution/gethexec/eventfilter"
-	"github.com/offchainlabs/nitro/orcafeed"
+	"github.com/offchainlabs/nitro/orcanitrofeed"
 	"github.com/offchainlabs/nitro/util/arbmath"
 	"github.com/offchainlabs/nitro/util/containers"
 	"github.com/offchainlabs/nitro/util/sharedmetrics"
@@ -301,11 +301,11 @@ type ExecutionEngine struct {
 	disableDelayedSequencingFilter bool
 
 	// orca receipt dispatch — nil이면 완전 무변경 경로 (createBlocksMutex 하에서만 사용)
-	orcaObserver *orcafeed.BlockObserver
+	orcaObserver *orcanitrofeed.BlockObserver
 }
 
 // SetOrcaObserver — 노드 초기화 시 1회 주입 (Start 이전).
-func (s *ExecutionEngine) SetOrcaObserver(o *orcafeed.BlockObserver) {
+func (s *ExecutionEngine) SetOrcaObserver(o *orcanitrofeed.BlockObserver) {
 	s.orcaObserver = o
 }
 

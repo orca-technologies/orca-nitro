@@ -197,6 +197,7 @@ func TestDispatcherByteBudgetEviction(t *testing.T) {
 	cfg.SocketPath = sock
 	cfg.BufferSize = 4096
 	cfg.BufferBytes = 4096 // 아주 작은 예산 — 대부분 evict
+	cfg.BufferAge = 0      // age 끔 — 바이트 예산만 검증
 	d, err := NewDispatcher(&cfg, orcanitrofeed.ModeLiveTx)
 	if err != nil {
 		t.Fatal(err)
@@ -246,5 +247,51 @@ func TestDispatcherByteBudgetEviction(t *testing.T) {
 	}
 	if last.Seq != 199 {
 		t.Fatalf("최신이 보존돼야 함: last seq=%d", last.Seq)
+	}
+}
+
+// age 초과 시 oldest 제거 — 재접속 클라이언트는 seq gap으로 감지
+func TestDispatcherAgeEviction(t *testing.T) {
+	sock := filepath.Join(mustTempDir(t), "orca.sock")
+	cfg := orcanitrofeed.DefaultConfig
+	cfg.Enable = true
+	cfg.SocketPath = sock
+	cfg.BufferSize = 4096
+	cfg.BufferBytes = 1 << 20
+	cfg.BufferAge = 80 * time.Millisecond
+	d, err := NewDispatcher(&cfg, orcanitrofeed.ModeLiveTx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+
+	for i := 0; i < 10; i++ {
+		d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.ReceiptMsg{BlockNumber: uint64(i)})
+	}
+	time.Sleep(200 * time.Millisecond) // age 초과
+
+	// 새 메시지 push로 trim이 돌고, 이후 접속 시 오래된 backlog는 없어야 함
+	d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.ReceiptMsg{BlockNumber: 10})
+	time.Sleep(50 * time.Millisecond)
+
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	typ, _ := readFrame(t, conn)
+	if typ != orcanitrofeed.MsgHello {
+		t.Fatalf("hello 먼저: %d", typ)
+	}
+	_, p := readFrame(t, conn)
+	var first orcanitrofeed.ReceiptMsg
+	if _, err := first.UnmarshalMsg(p); err != nil {
+		t.Fatal(err)
+	}
+	if first.Seq < 10 {
+		t.Fatalf("age 초과 backlog가 남아있음: first seq=%d", first.Seq)
+	}
+	if first.BlockNumber != 10 {
+		t.Fatalf("최신만 남아야 함: %+v", first)
 	}
 }

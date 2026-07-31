@@ -60,17 +60,23 @@ func (r *msgRing) pop() (queuedMsg, bool) {
 	return m, true
 }
 
-// frameLog — 인코딩된 프레임의 바이트 예산 retention log. 클라이언트가 없어도
-// 보관하고, 예산 초과 시 oldest부터 버린다 (컨슈머 다운타임 무손실 재접속용).
+type retainedFrame struct {
+	data []byte
+	at   time.Time // retention 시각 (wall clock) — age eviction용
+}
+
+// frameLog — 인코딩된 프레임 retention log. 클라이언트가 없어도 보관하고,
+// 바이트 예산·최대 age 중 먼저 닿는 쪽부터 oldest를 버린다.
 // PERF:MEM-GROW
 //
-//	cost: mem=O(budget), budget 기본 1GiB (config)
+//	cost: mem=O(min(budget, throughput×age)), budget 기본 1GiB / age 기본 30m
 //	note: 컨슈머 backlog 보관 — drop-oldest로 상한 고정
 type frameLog struct {
-	frames  [][]byte
+	frames  []retainedFrame
 	start   uint64 // frames[0]의 전역 인덱스
 	bytes   int
 	budget  int
+	maxAge  time.Duration // 0 = age 제한 없음
 	dropped uint64
 }
 
@@ -79,20 +85,37 @@ func (l *frameLog) end() uint64 {
 	return l.start + uint64(len(l.frames))
 }
 
-func (l *frameLog) push(f []byte) {
-	l.frames = append(l.frames, f)
-	l.bytes += len(f)
-	for l.bytes > l.budget && len(l.frames) > 1 {
-		l.bytes -= len(l.frames[0])
-		l.frames[0] = nil
-		l.frames = l.frames[1:]
-		l.start++
-		l.dropped++
+func (l *frameLog) dropOldest() {
+	l.bytes -= len(l.frames[0].data)
+	l.frames[0] = retainedFrame{}
+	l.frames = l.frames[1:]
+	l.start++
+	l.dropped++
+}
+
+// trim — 바이트 예산·age 초과분 drop. age는 마지막 프레임까지 비울 수 있고,
+// 바이트 예산은 최소 1프레임은 남긴다 (단일 거대 프레임 허용).
+func (l *frameLog) trim(now time.Time) {
+	for len(l.frames) > 0 {
+		if l.maxAge > 0 && now.Sub(l.frames[0].at) > l.maxAge {
+			l.dropOldest()
+			continue
+		}
+		if l.bytes > l.budget && len(l.frames) > 1 {
+			l.dropOldest()
+			continue
+		}
+		break
 	}
-	// 앞부분을 slice-off해도 backing array는 유지되므로 주기적으로 압축
 	if cap(l.frames) > 4096 && len(l.frames)*2 < cap(l.frames) {
-		l.frames = append(make([][]byte, 0, len(l.frames)*2), l.frames...)
+		l.frames = append(make([]retainedFrame, 0, len(l.frames)*2), l.frames...)
 	}
+}
+
+func (l *frameLog) push(f []byte, now time.Time) {
+	l.frames = append(l.frames, retainedFrame{data: f, at: now})
+	l.bytes += len(f)
+	l.trim(now)
 }
 
 // Dispatcher — unix socket 리스너 + staging ring + retention log.
@@ -143,7 +166,10 @@ func NewDispatcher(cfg *orcanitrofeed.Config, mode string) (*Dispatcher, error) 
 		mode:        mode,
 		socketPath:  cfg.SocketPath,
 		staging:     newMsgRing(cfg.BufferSize),
-		retained:    &frameLog{frames: nil, start: 0, bytes: 0, budget: cfg.BufferBytes, dropped: 0},
+		retained: &frameLog{
+			frames: nil, start: 0, bytes: 0,
+			budget: cfg.BufferBytes, maxAge: cfg.BufferAge, dropped: 0,
+		},
 		conns:       make(map[net.Conn]struct{}),
 		listener:    listener,
 		mu:          sync.Mutex{},
@@ -237,14 +263,14 @@ func (d *Dispatcher) writeLoop() {
 		//   note: 프레임 버퍼는 frameLog가 소유 (drop-oldest로 수명 관리)
 		frame := encodeFrame(m.typ, m.msg)
 		d.mu.Lock()
-		d.retained.push(frame)
+		d.retained.push(frame, time.Now())
 		d.mu.Unlock()
 		d.logCond.Broadcast()
 	}
 }
 
 // sendLoop — 연결별 sender. retention log 커서를 따라가며 backlog replay 후
-// live tail. 예산 초과로 밀린 구간은 건너뛴다 (클라이언트는 seq gap으로 감지).
+// live tail. 예산·age 초과로 밀린 구간은 건너뛴다 (클라이언트는 seq gap으로 감지).
 func (d *Dispatcher) sendLoop(conn net.Conn) {
 	defer d.connWg.Done()
 	defer func() {
@@ -255,24 +281,29 @@ func (d *Dispatcher) sendLoop(conn net.Conn) {
 	}()
 
 	d.mu.Lock()
+	d.retained.trim(time.Now())
 	cursor := d.retained.start // 보관 중인 가장 오래된 것부터 replay
 	d.mu.Unlock()
 
 	batch := make([][]byte, 0, 256)
 	for {
 		d.mu.Lock()
+		d.retained.trim(time.Now())
 		for cursor >= d.retained.end() && !d.closed {
 			d.logCond.Wait()
+			d.retained.trim(time.Now())
 		}
 		if cursor >= d.retained.end() && d.closed {
 			d.mu.Unlock()
 			return
 		}
 		if cursor < d.retained.start {
-			cursor = d.retained.start // 예산 초과로 밀림 — gap
+			cursor = d.retained.start // 예산·age 초과로 밀림 — gap
 		}
 		batch = batch[:0]
-		batch = append(batch, d.retained.frames[cursor-d.retained.start:]...)
+		for _, rf := range d.retained.frames[cursor-d.retained.start:] {
+			batch = append(batch, rf.data)
+		}
 		// #nosec G115
 		cursor += uint64(len(batch))
 		d.mu.Unlock()

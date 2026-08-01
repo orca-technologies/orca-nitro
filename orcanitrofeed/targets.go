@@ -3,7 +3,7 @@ package orcanitrofeed
 import "github.com/ethereum/go-ethereum/common"
 
 // TARGETS — TOKEN_METADATA §1 `(to, selector)` allowlist.
-// Flap Portal create selector is not measured yet — omit until fixed.
+// Flap: multi-step (commit/stage/newTokenV*); best create SoT = newTokenV7.
 
 type targetKey struct {
 	to  common.Address
@@ -30,6 +30,8 @@ func init() {
 	add("0xC25c1e209313856e3A66FDd3aFd98aBe90B047F6", [4]byte{0xc2, 0xf0, 0xcd, 0x4b}) // RobinPad
 	add("0x9634AA5EB176064D9D04d6282E3D4a0A2456F01c", [4]byte{0x94, 0xae, 0xd7, 0xd0}) // Runner
 	add("0xD69A9fDee44a42c8E614128FEda486128cB27222", [4]byte{0x34, 0xfb, 0x85, 0x89}) // RobinFun
+	// Flap Portal proxy — newTokenV7 (older V2–V6 / commit / stage not TARGET'd)
+	add("0x26605f322f7fF986f381bB9A6e3f5DAb0bEaEb09", [4]byte{0x87, 0xef, 0x5b, 0x30})
 }
 
 func isTarget(to common.Address, input []byte) (sel [4]byte, ok bool) {

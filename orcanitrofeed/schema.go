@@ -29,7 +29,7 @@ const (
 )
 
 // AccountKind — GetCodeSize(+선택적 GetCode)로 판별한 계정 종류.
-// wire는 u8. Rust `types-evm-orca-nitro::schema::AccountKind`와 lockstep.
+// wire는 u8. Rust `types-evm-orca-nitro::schema::account_kind::AccountKind`와 lockstep.
 const (
 	AccountKindEmpty    uint8 = 0 // GetCodeSize == 0
 	AccountKindEip7702  uint8 = 1 // size==23 && ParseDelegation ok (0xef0100‖addr)
@@ -66,10 +66,10 @@ type LogRecord struct {
 	InnerIndex uint16
 }
 
-//msgp:tuple CallRecord
-// CallRecord — TARGET `(to, selector)` hit at OnEnter (TOKEN_METADATA D3).
+//msgp:tuple WhitelistedCallRecord
+// WhitelistedCallRecord — TARGET `(to, selector)` hit at OnEnter (TOKEN_METADATA D3).
 // Not a full call dump: allowlist only. Shares InnerIndex with logs/transfers.
-type CallRecord struct {
+type WhitelistedCallRecord struct {
 	To         [20]byte
 	Selector   [4]byte
 	Input      []byte // full call input (selector ‖ args)
@@ -106,7 +106,7 @@ type ReceiptMsg struct {
 	L1BlockNumber uint64
 	Logs          []LogRecord
 	Transfers     []TransferRecord
-	Calls         []CallRecord // TARGET allowlist hits (may be empty)
+	Calls         []WhitelistedCallRecord // TARGET allowlist hits (may be empty)
 	// 노드가 이 receipt를 방출한 시각 (unix ns). retention replay 시에도 원래
 	// 방출 시각이 보존된다 — reader의 live feed ts 기준. sweep 재실행에선
 	// 재실행 시각이므로 의미 없음 (reader가 l2 timestamp 합성 사용).

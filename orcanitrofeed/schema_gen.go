@@ -110,173 +110,6 @@ func (z BlockSealMsg) Msgsize() (s int) {
 }
 
 // DecodeMsg implements msgp.Decodable
-func (z *CallRecord) DecodeMsg(dc *msgp.Reader) (err error) {
-	var zb0001 uint32
-	zb0001, err = dc.ReadArrayHeader()
-	if err != nil {
-		err = msgp.WrapError(err)
-		return
-	}
-	if zb0001 != 7 {
-		err = msgp.ArrayError{Wanted: 7, Got: zb0001}
-		return
-	}
-	err = dc.ReadExactBytes((z.To)[:])
-	if err != nil {
-		err = msgp.WrapError(err, "To")
-		return
-	}
-	err = dc.ReadExactBytes((z.Selector)[:])
-	if err != nil {
-		err = msgp.WrapError(err, "Selector")
-		return
-	}
-	z.Input, err = dc.ReadBytes(z.Input)
-	if err != nil {
-		err = msgp.WrapError(err, "Input")
-		return
-	}
-	z.Value, err = dc.ReadBytes(z.Value)
-	if err != nil {
-		err = msgp.WrapError(err, "Value")
-		return
-	}
-	z.Depth, err = dc.ReadUint16()
-	if err != nil {
-		err = msgp.WrapError(err, "Depth")
-		return
-	}
-	z.Reverted, err = dc.ReadBool()
-	if err != nil {
-		err = msgp.WrapError(err, "Reverted")
-		return
-	}
-	z.InnerIndex, err = dc.ReadUint16()
-	if err != nil {
-		err = msgp.WrapError(err, "InnerIndex")
-		return
-	}
-	return
-}
-
-// EncodeMsg implements msgp.Encodable
-func (z *CallRecord) EncodeMsg(en *msgp.Writer) (err error) {
-	// array header, size 7
-	err = en.Append(0x97)
-	if err != nil {
-		return
-	}
-	err = en.WriteBytes((z.To)[:])
-	if err != nil {
-		err = msgp.WrapError(err, "To")
-		return
-	}
-	err = en.WriteBytes((z.Selector)[:])
-	if err != nil {
-		err = msgp.WrapError(err, "Selector")
-		return
-	}
-	err = en.WriteBytes(z.Input)
-	if err != nil {
-		err = msgp.WrapError(err, "Input")
-		return
-	}
-	err = en.WriteBytes(z.Value)
-	if err != nil {
-		err = msgp.WrapError(err, "Value")
-		return
-	}
-	err = en.WriteUint16(z.Depth)
-	if err != nil {
-		err = msgp.WrapError(err, "Depth")
-		return
-	}
-	err = en.WriteBool(z.Reverted)
-	if err != nil {
-		err = msgp.WrapError(err, "Reverted")
-		return
-	}
-	err = en.WriteUint16(z.InnerIndex)
-	if err != nil {
-		err = msgp.WrapError(err, "InnerIndex")
-		return
-	}
-	return
-}
-
-// MarshalMsg implements msgp.Marshaler
-func (z *CallRecord) MarshalMsg(b []byte) (o []byte, err error) {
-	o = msgp.Require(b, z.Msgsize())
-	// array header, size 7
-	o = append(o, 0x97)
-	o = msgp.AppendBytes(o, (z.To)[:])
-	o = msgp.AppendBytes(o, (z.Selector)[:])
-	o = msgp.AppendBytes(o, z.Input)
-	o = msgp.AppendBytes(o, z.Value)
-	o = msgp.AppendUint16(o, z.Depth)
-	o = msgp.AppendBool(o, z.Reverted)
-	o = msgp.AppendUint16(o, z.InnerIndex)
-	return
-}
-
-// UnmarshalMsg implements msgp.Unmarshaler
-func (z *CallRecord) UnmarshalMsg(bts []byte) (o []byte, err error) {
-	var zb0001 uint32
-	zb0001, bts, err = msgp.ReadArrayHeaderBytes(bts)
-	if err != nil {
-		err = msgp.WrapError(err)
-		return
-	}
-	if zb0001 != 7 {
-		err = msgp.ArrayError{Wanted: 7, Got: zb0001}
-		return
-	}
-	bts, err = msgp.ReadExactBytes(bts, (z.To)[:])
-	if err != nil {
-		err = msgp.WrapError(err, "To")
-		return
-	}
-	bts, err = msgp.ReadExactBytes(bts, (z.Selector)[:])
-	if err != nil {
-		err = msgp.WrapError(err, "Selector")
-		return
-	}
-	z.Input, bts, err = msgp.ReadBytesBytes(bts, z.Input)
-	if err != nil {
-		err = msgp.WrapError(err, "Input")
-		return
-	}
-	z.Value, bts, err = msgp.ReadBytesBytes(bts, z.Value)
-	if err != nil {
-		err = msgp.WrapError(err, "Value")
-		return
-	}
-	z.Depth, bts, err = msgp.ReadUint16Bytes(bts)
-	if err != nil {
-		err = msgp.WrapError(err, "Depth")
-		return
-	}
-	z.Reverted, bts, err = msgp.ReadBoolBytes(bts)
-	if err != nil {
-		err = msgp.WrapError(err, "Reverted")
-		return
-	}
-	z.InnerIndex, bts, err = msgp.ReadUint16Bytes(bts)
-	if err != nil {
-		err = msgp.WrapError(err, "InnerIndex")
-		return
-	}
-	o = bts
-	return
-}
-
-// Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
-func (z *CallRecord) Msgsize() (s int) {
-	s = 1 + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.ArrayHeaderSize + (4 * (msgp.ByteSize)) + msgp.BytesPrefixSize + len(z.Input) + msgp.BytesPrefixSize + len(z.Value) + msgp.Uint16Size + msgp.BoolSize + msgp.Uint16Size
-	return
-}
-
-// DecodeMsg implements msgp.Decodable
 func (z *Hello) DecodeMsg(dc *msgp.Reader) (err error) {
 	var zb0001 uint32
 	zb0001, err = dc.ReadArrayHeader()
@@ -917,7 +750,7 @@ func (z *ReceiptMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 	if cap(z.Calls) >= int(zb0004) {
 		z.Calls = (z.Calls)[:zb0004]
 	} else {
-		z.Calls = make([]CallRecord, zb0004)
+		z.Calls = make([]WhitelistedCallRecord, zb0004)
 	}
 	for za0006 := range z.Calls {
 		err = z.Calls[za0006].DecodeMsg(dc)
@@ -1295,7 +1128,7 @@ func (z *ReceiptMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 	if cap(z.Calls) >= int(zb0004) {
 		z.Calls = (z.Calls)[:zb0004]
 	} else {
-		z.Calls = make([]CallRecord, zb0004)
+		z.Calls = make([]WhitelistedCallRecord, zb0004)
 	}
 	for za0006 := range z.Calls {
 		bts, err = z.Calls[za0006].UnmarshalMsg(bts)
@@ -1527,5 +1360,172 @@ func (z *TransferRecord) UnmarshalMsg(bts []byte) (o []byte, err error) {
 // Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
 func (z *TransferRecord) Msgsize() (s int) {
 	s = 1 + msgp.Uint8Size + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.BytesPrefixSize + len(z.Value) + msgp.BytesPrefixSize + len(z.PostBalanceFrom) + msgp.BytesPrefixSize + len(z.PostBalanceTo) + msgp.Uint16Size + msgp.BoolSize + msgp.Uint16Size
+	return
+}
+
+// DecodeMsg implements msgp.Decodable
+func (z *WhitelistedCallRecord) DecodeMsg(dc *msgp.Reader) (err error) {
+	var zb0001 uint32
+	zb0001, err = dc.ReadArrayHeader()
+	if err != nil {
+		err = msgp.WrapError(err)
+		return
+	}
+	if zb0001 != 7 {
+		err = msgp.ArrayError{Wanted: 7, Got: zb0001}
+		return
+	}
+	err = dc.ReadExactBytes((z.To)[:])
+	if err != nil {
+		err = msgp.WrapError(err, "To")
+		return
+	}
+	err = dc.ReadExactBytes((z.Selector)[:])
+	if err != nil {
+		err = msgp.WrapError(err, "Selector")
+		return
+	}
+	z.Input, err = dc.ReadBytes(z.Input)
+	if err != nil {
+		err = msgp.WrapError(err, "Input")
+		return
+	}
+	z.Value, err = dc.ReadBytes(z.Value)
+	if err != nil {
+		err = msgp.WrapError(err, "Value")
+		return
+	}
+	z.Depth, err = dc.ReadUint16()
+	if err != nil {
+		err = msgp.WrapError(err, "Depth")
+		return
+	}
+	z.Reverted, err = dc.ReadBool()
+	if err != nil {
+		err = msgp.WrapError(err, "Reverted")
+		return
+	}
+	z.InnerIndex, err = dc.ReadUint16()
+	if err != nil {
+		err = msgp.WrapError(err, "InnerIndex")
+		return
+	}
+	return
+}
+
+// EncodeMsg implements msgp.Encodable
+func (z *WhitelistedCallRecord) EncodeMsg(en *msgp.Writer) (err error) {
+	// array header, size 7
+	err = en.Append(0x97)
+	if err != nil {
+		return
+	}
+	err = en.WriteBytes((z.To)[:])
+	if err != nil {
+		err = msgp.WrapError(err, "To")
+		return
+	}
+	err = en.WriteBytes((z.Selector)[:])
+	if err != nil {
+		err = msgp.WrapError(err, "Selector")
+		return
+	}
+	err = en.WriteBytes(z.Input)
+	if err != nil {
+		err = msgp.WrapError(err, "Input")
+		return
+	}
+	err = en.WriteBytes(z.Value)
+	if err != nil {
+		err = msgp.WrapError(err, "Value")
+		return
+	}
+	err = en.WriteUint16(z.Depth)
+	if err != nil {
+		err = msgp.WrapError(err, "Depth")
+		return
+	}
+	err = en.WriteBool(z.Reverted)
+	if err != nil {
+		err = msgp.WrapError(err, "Reverted")
+		return
+	}
+	err = en.WriteUint16(z.InnerIndex)
+	if err != nil {
+		err = msgp.WrapError(err, "InnerIndex")
+		return
+	}
+	return
+}
+
+// MarshalMsg implements msgp.Marshaler
+func (z *WhitelistedCallRecord) MarshalMsg(b []byte) (o []byte, err error) {
+	o = msgp.Require(b, z.Msgsize())
+	// array header, size 7
+	o = append(o, 0x97)
+	o = msgp.AppendBytes(o, (z.To)[:])
+	o = msgp.AppendBytes(o, (z.Selector)[:])
+	o = msgp.AppendBytes(o, z.Input)
+	o = msgp.AppendBytes(o, z.Value)
+	o = msgp.AppendUint16(o, z.Depth)
+	o = msgp.AppendBool(o, z.Reverted)
+	o = msgp.AppendUint16(o, z.InnerIndex)
+	return
+}
+
+// UnmarshalMsg implements msgp.Unmarshaler
+func (z *WhitelistedCallRecord) UnmarshalMsg(bts []byte) (o []byte, err error) {
+	var zb0001 uint32
+	zb0001, bts, err = msgp.ReadArrayHeaderBytes(bts)
+	if err != nil {
+		err = msgp.WrapError(err)
+		return
+	}
+	if zb0001 != 7 {
+		err = msgp.ArrayError{Wanted: 7, Got: zb0001}
+		return
+	}
+	bts, err = msgp.ReadExactBytes(bts, (z.To)[:])
+	if err != nil {
+		err = msgp.WrapError(err, "To")
+		return
+	}
+	bts, err = msgp.ReadExactBytes(bts, (z.Selector)[:])
+	if err != nil {
+		err = msgp.WrapError(err, "Selector")
+		return
+	}
+	z.Input, bts, err = msgp.ReadBytesBytes(bts, z.Input)
+	if err != nil {
+		err = msgp.WrapError(err, "Input")
+		return
+	}
+	z.Value, bts, err = msgp.ReadBytesBytes(bts, z.Value)
+	if err != nil {
+		err = msgp.WrapError(err, "Value")
+		return
+	}
+	z.Depth, bts, err = msgp.ReadUint16Bytes(bts)
+	if err != nil {
+		err = msgp.WrapError(err, "Depth")
+		return
+	}
+	z.Reverted, bts, err = msgp.ReadBoolBytes(bts)
+	if err != nil {
+		err = msgp.WrapError(err, "Reverted")
+		return
+	}
+	z.InnerIndex, bts, err = msgp.ReadUint16Bytes(bts)
+	if err != nil {
+		err = msgp.WrapError(err, "InnerIndex")
+		return
+	}
+	o = bts
+	return
+}
+
+// Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
+func (z *WhitelistedCallRecord) Msgsize() (s int) {
+	s = 1 + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.ArrayHeaderSize + (4 * (msgp.ByteSize)) + msgp.BytesPrefixSize + len(z.Input) + msgp.BytesPrefixSize + len(z.Value) + msgp.Uint16Size + msgp.BoolSize + msgp.Uint16Size
 	return
 }

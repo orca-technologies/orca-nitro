@@ -36,7 +36,7 @@ func goldenMessages() map[string]msgp.Marshaler {
 				PostBalanceFrom: []byte{0x01}, PostBalanceTo: []byte{0x02},
 				Depth: 0, Reverted: false, InnerIndex: 0,
 			}},
-			Calls: []CallRecord{{
+			Calls: []WhitelistedCallRecord{{
 				To: addr(0xeb), Selector: [4]byte{0x88, 0x2d, 0xb7, 0x07},
 				Input: []byte{0x88, 0x2d, 0xb7, 0x07, 0xca}, Value: nil,
 				Depth: 1, Reverted: false, InnerIndex: 2,

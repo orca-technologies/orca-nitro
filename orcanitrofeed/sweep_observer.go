@@ -28,7 +28,7 @@ type txCapture struct {
 	from      common.Address
 	transfers []TransferRecord
 	logs      []LogRecord
-	calls     []CallRecord
+	calls     []WhitelistedCallRecord
 }
 
 func NewSweepObserver(sink Sink, ranges [][2]uint64) *SweepObserver {
@@ -52,7 +52,7 @@ func NewSweepObserver(sink Sink, ranges [][2]uint64) *SweepObserver {
 			copy(cp.logs, ls)
 		}
 		if cs := o.collector.DrainCalls(); len(cs) > 0 {
-			cp.calls = make([]CallRecord, len(cs))
+			cp.calls = make([]WhitelistedCallRecord, len(cs))
 			copy(cp.calls, cs)
 		}
 		o.txCaps[tx.Hash()] = cp
@@ -81,7 +81,7 @@ func (o *SweepObserver) OnBlockExecuted(block *types.Block, receipts types.Recei
 		var sender common.Address
 		var transfers []TransferRecord
 		var logs []LogRecord
-		var calls []CallRecord
+		var calls []WhitelistedCallRecord
 		if cp, ok := o.txCaps[tx.Hash()]; ok {
 			sender = cp.from
 			transfers = cp.transfers

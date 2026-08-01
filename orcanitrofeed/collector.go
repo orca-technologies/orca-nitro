@@ -20,8 +20,8 @@ type Collector struct {
 	//   note: records·logs·calls는 Drain 후 재사용 (capacity 유지)
 	records []TransferRecord
 	logs    []LogRecord
-	calls   []CallRecord
-	// tx 안 방출 순번 — 로그·transfer·CallRecord가 공유한다. revert된 항목도
+	calls   []WhitelistedCallRecord
+	// tx 안 방출 순번 — 로그·transfer·WhitelistedCallRecord가 공유한다. revert된 항목도
 	// 번호를 소비하므로 살아남은 항목의 상대 순서가 보존된다.
 	innerNext uint16
 	frames    []frameMark // open frame 스택
@@ -119,9 +119,9 @@ func (c *Collector) DrainLogs() []LogRecord {
 	return c.logs
 }
 
-// DrainCalls — TARGET CallRecord (revert 플래그 포함)를 방출 순서대로 반환한다.
+// DrainCalls — TARGET WhitelistedCallRecord (revert 플래그 포함)를 방출 순서대로 반환한다.
 // 반환 슬라이스는 다음 tx 수집 시작(Reset) 전까지만 유효 — 이후 재사용된다.
-func (c *Collector) DrainCalls() []CallRecord {
+func (c *Collector) DrainCalls() []WhitelistedCallRecord {
 	return c.calls
 }
 
@@ -187,7 +187,7 @@ func (c *Collector) onEnter(depth int, _ byte, _ common.Address, to common.Addre
 		inputCopy := make([]byte, len(input))
 		copy(inputCopy, input)
 		// #nosec G115
-		c.calls = append(c.calls, CallRecord{
+		c.calls = append(c.calls, WhitelistedCallRecord{
 			To:         to,
 			Selector:   sel,
 			Input:      inputCopy,
@@ -207,7 +207,7 @@ func (c *Collector) onExit(_ int, _ []byte, _ uint64, _ error, reverted bool) {
 	frame := c.frames[len(c.frames)-1]
 	c.frames = c.frames[:len(c.frames)-1]
 	if reverted {
-		// transfer·CallRecord는 "시도됐다 무효화됨"이 신호가 되므로 플래그만 세운다.
+		// transfer·WhitelistedCallRecord는 "시도됐다 무효화됨"이 신호가 되므로 플래그만 세운다.
 		for i := frame.startIdx; i < len(c.records); i++ {
 			c.records[i].Reverted = true
 		}

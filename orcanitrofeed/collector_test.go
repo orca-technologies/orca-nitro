@@ -220,7 +220,7 @@ func TestCollectorEmitsTargetCallRecord(t *testing.T) {
 
 	calls := c.DrainCalls()
 	if len(calls) != 1 {
-		t.Fatalf("CallRecord 수: %d", len(calls))
+		t.Fatalf("WhitelistedCallRecord 수: %d", len(calls))
 	}
 	r := calls[0]
 	if r.To != airlock || r.Selector != [4]byte{0x88, 0x2d, 0xb7, 0x07} {
@@ -237,7 +237,7 @@ func TestCollectorIgnoresNonTargetCalls(t *testing.T) {
 	h.OnEnter(1, byte(vm.CALL), addrA, addrB, []byte{0xde, 0xad, 0xbe, 0xef}, 0, nil)
 	h.OnExit(1, nil, 0, nil, false)
 	if calls := c.DrainCalls(); len(calls) != 0 {
-		t.Fatalf("비타겟 CallRecord: %+v", calls)
+		t.Fatalf("비타겟 WhitelistedCallRecord: %+v", calls)
 	}
 }
 
@@ -250,6 +250,6 @@ func TestCollectorMarksRevertedCallRecord(t *testing.T) {
 	h.OnExit(1, nil, 0, nil, true)
 	calls := c.DrainCalls()
 	if len(calls) != 1 || !calls[0].Reverted {
-		t.Fatalf("revert CallRecord: %+v", calls)
+		t.Fatalf("revert WhitelistedCallRecord: %+v", calls)
 	}
 }

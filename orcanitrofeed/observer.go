@@ -29,8 +29,8 @@ type BlockObserver struct {
 
 	// PERF:MEM-GROW
 	//   cost: mem=O(N_addrs)/block, N~1e0..1e2 → 블록마다 clear
-	//   note: EOA/contract 판별 캐시 (GetCodeSize 중복 회피)
-	codeCache map[common.Address]bool
+	//   note: AccountKind 캐시 (GetCodeSize·GetCode 중복 회피)
+	codeCache map[common.Address]uint8
 
 	// block 모드: seal까지 버퍼링
 	pendingMsgs []*ReceiptMsg
@@ -44,7 +44,7 @@ func NewBlockObserver(sink Sink, mode string) *BlockObserver {
 		blockNumber:   0,
 		l2Timestamp:   0,
 		l1BlockNumber: 0,
-		codeCache:     make(map[common.Address]bool),
+		codeCache:     make(map[common.Address]uint8),
 		pendingMsgs:   nil,
 	}
 }
@@ -112,15 +112,20 @@ func (o *BlockObserver) buildReceiptMsg(tx *types.Transaction, sender common.Add
 		logs = make([]LogRecord, len(ls))
 		copy(logs, ls)
 	}
-	return newReceiptMsg(o.blockNumber, o.l2Timestamp, o.l1BlockNumber, txIndex, tx, sender, receipt, transfers, logs,
-		func(addr common.Address) bool { return isContractCached(statedb, o.codeCache, addr) })
+	var calls []CallRecord
+	if cs := o.collector.DrainCalls(); len(cs) > 0 {
+		calls = make([]CallRecord, len(cs))
+		copy(calls, cs)
+	}
+	return newReceiptMsg(o.blockNumber, o.l2Timestamp, o.l1BlockNumber, txIndex, tx, sender, receipt, transfers, logs, calls,
+		func(addr common.Address) uint8 { return accountKindCached(statedb, o.codeCache, addr) })
 }
 
 // newReceiptMsg — live(BlockObserver)·sweep(SweepObserver) 공용 메시지 조립.
-// transfers는 호출자가 소유권을 넘긴 슬라이스여야 한다 (재사용 버퍼 금지).
-func newReceiptMsg(blockNumber, l2Timestamp, l1BlockNumber uint64, txIndex int, tx *types.Transaction, sender common.Address, receipt *types.Receipt, transfers []TransferRecord, logs []LogRecord, isContract func(common.Address) bool) *ReceiptMsg {
+// transfers/calls는 호출자가 소유권을 넘긴 슬라이스여야 한다 (재사용 버퍼 금지).
+func newReceiptMsg(blockNumber, l2Timestamp, l1BlockNumber uint64, txIndex int, tx *types.Transaction, sender common.Address, receipt *types.Receipt, transfers []TransferRecord, logs []LogRecord, calls []CallRecord, accountKind func(common.Address) uint8) *ReceiptMsg {
 	// PERF:ALLOC
-	//   cost: mem=O(1)·struct + O(N_logs+N_transfers) 슬라이스/tx, N~1e0..1e2 → N 불확실
+	//   cost: mem=O(1)·struct + O(N_logs+N_transfers+N_calls) 슬라이스/tx, N~1e0..1e2 → N 불확실
 	//   note: msg는 writer가 비동기 직렬화하므로 tx-scope 버퍼 재사용 불가
 	msg := &ReceiptMsg{
 		Seq:         0,
@@ -131,7 +136,8 @@ func newReceiptMsg(blockNumber, l2Timestamp, l1BlockNumber uint64, txIndex int, 
 		TxType:            tx.Type(),
 		From:              sender,
 		To:                [20]byte{},
-		ToIsContract:      false,
+		FromAccountKind:   accountKind(sender),
+		ToAccountKind:     AccountKindEmpty,
 		ContractAddress:   receipt.ContractAddress,
 		Nonce:             tx.Nonce(),
 		Gas:               tx.Gas(),
@@ -145,12 +151,13 @@ func newReceiptMsg(blockNumber, l2Timestamp, l1BlockNumber uint64, txIndex int, 
 		L1BlockNumber:     l1BlockNumber,
 		Logs:              nil,
 		Transfers:         transfers,
+		Calls:             calls,
 		// #nosec G115
 		EmittedAtNs: uint64(time.Now().UnixNano()),
 	}
 	if to := tx.To(); to != nil {
 		msg.To = *to
-		msg.ToIsContract = isContract(*to)
+		msg.ToAccountKind = accountKind(*to)
 	}
 	if receipt.EffectiveGasPrice != nil {
 		msg.EffectiveGasPrice = receipt.EffectiveGasPrice.Bytes()
@@ -177,11 +184,25 @@ func newReceiptMsg(blockNumber, l2Timestamp, l1BlockNumber uint64, txIndex int, 
 	return msg
 }
 
-func isContractCached(statedb *state.StateDB, cache map[common.Address]bool, addr common.Address) bool {
+// accountKindCached — Empty / Eip7702 / Contract. GetCode는 size==23일 때만.
+func accountKindCached(statedb *state.StateDB, cache map[common.Address]uint8, addr common.Address) uint8 {
 	if v, ok := cache[addr]; ok {
 		return v
 	}
-	v := statedb.GetCodeSize(addr) > 0
-	cache[addr] = v
-	return v
+	size := statedb.GetCodeSize(addr)
+	var kind uint8
+	switch {
+	case size == 0:
+		kind = AccountKindEmpty
+	case size == 23:
+		if _, ok := types.ParseDelegation(statedb.GetCode(addr)); ok {
+			kind = AccountKindEip7702
+		} else {
+			kind = AccountKindContract
+		}
+	default:
+		kind = AccountKindContract
+	}
+	cache[addr] = kind
+	return kind
 }

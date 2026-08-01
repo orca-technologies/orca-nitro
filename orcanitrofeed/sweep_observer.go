@@ -28,6 +28,7 @@ type txCapture struct {
 	from      common.Address
 	transfers []TransferRecord
 	logs      []LogRecord
+	calls     []CallRecord
 }
 
 func NewSweepObserver(sink Sink, ranges [][2]uint64) *SweepObserver {
@@ -41,7 +42,7 @@ func NewSweepObserver(sink Sink, ranges [][2]uint64) *SweepObserver {
 		if tx == nil {
 			return
 		}
-		cp := &txCapture{from: from, transfers: nil, logs: nil}
+		cp := &txCapture{from: from, transfers: nil, logs: nil, calls: nil}
 		if len(transfers) > 0 {
 			cp.transfers = make([]TransferRecord, len(transfers))
 			copy(cp.transfers, transfers)
@@ -49,6 +50,10 @@ func NewSweepObserver(sink Sink, ranges [][2]uint64) *SweepObserver {
 		if ls := o.collector.DrainLogs(); len(ls) > 0 {
 			cp.logs = make([]LogRecord, len(ls))
 			copy(cp.logs, ls)
+		}
+		if cs := o.collector.DrainCalls(); len(cs) > 0 {
+			cp.calls = make([]CallRecord, len(cs))
+			copy(cp.calls, cs)
 		}
 		o.txCaps[tx.Hash()] = cp
 	})
@@ -65,7 +70,7 @@ func (o *SweepObserver) OnBlockExecuted(block *types.Block, receipts types.Recei
 	if !o.inRange(blockNumber) {
 		return
 	}
-	codeCache := make(map[common.Address]bool)
+	codeCache := make(map[common.Address]uint8)
 	for i, tx := range block.Transactions() {
 		if tx.Type() == types.ArbitrumInternalTxType {
 			continue
@@ -76,14 +81,16 @@ func (o *SweepObserver) OnBlockExecuted(block *types.Block, receipts types.Recei
 		var sender common.Address
 		var transfers []TransferRecord
 		var logs []LogRecord
+		var calls []CallRecord
 		if cp, ok := o.txCaps[tx.Hash()]; ok {
 			sender = cp.from
 			transfers = cp.transfers
 			logs = cp.logs
+			calls = cp.calls
 		}
 		l1BlockNumber := types.DeserializeHeaderExtraInformation(block.Header()).L1BlockNumber
-		msg := newReceiptMsg(blockNumber, block.Time(), l1BlockNumber, i, tx, sender, receipts[i], transfers, logs,
-			func(addr common.Address) bool { return isContractCached(statedb, codeCache, addr) })
+		msg := newReceiptMsg(blockNumber, block.Time(), l1BlockNumber, i, tx, sender, receipts[i], transfers, logs, calls,
+			func(addr common.Address) uint8 { return accountKindCached(statedb, codeCache, addr) })
 		o.sink.Enqueue(MsgReceipt, msg)
 	}
 }

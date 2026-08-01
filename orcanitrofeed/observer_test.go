@@ -74,8 +74,9 @@ func TestObserverTxModeDispatch(t *testing.T) {
 	if msg.L1BlockNumber != 99 {
 		t.Fatalf("l1 block: %+v", msg)
 	}
-	if msg.From != sender || msg.To != to || !msg.ToIsContract {
-		t.Fatalf("from/to/contract 플래그: %+v", msg)
+	if msg.From != sender || msg.To != to ||
+		msg.FromAccountKind != AccountKindEmpty || msg.ToAccountKind != AccountKindContract {
+		t.Fatalf("from/to/account kind: %+v", msg)
 	}
 	if big.NewInt(0).SetBytes(msg.Value).Int64() != 30 || len(msg.Calldata) != 2 || msg.Nonce != 7 {
 		t.Fatalf("tx 필드: %+v", msg)
@@ -126,8 +127,8 @@ func TestObserverBlockModeDispatch(t *testing.T) {
 	if msg.BlockNumber != 200 || msg.TxIndex != 0 {
 		t.Fatalf("block 모드 컨텍스트: %+v", msg)
 	}
-	if msg.ToIsContract {
-		t.Fatalf("EOA인데 contract 플래그: %+v", msg)
+	if msg.ToAccountKind != AccountKindEmpty {
+		t.Fatalf("EOA인데 ToAccountKind: %+v", msg)
 	}
 }
 
@@ -176,6 +177,25 @@ func TestObserverEmitsCollectorLogsWithInnerIndex(t *testing.T) {
 	}
 	if len(msg.Transfers) != 1 || msg.Transfers[0].InnerIndex != 0 {
 		t.Fatalf("transfer inner_index: %+v", msg.Transfers)
+	}
+}
+
+func TestAccountKindEip7702(t *testing.T) {
+	sink := &memSink{}
+	obs := NewBlockObserver(sink, "tx")
+	sdb := newTestStateDB(t)
+	to := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	delegate := common.HexToAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	sender := common.HexToAddress("0xcccccccccccccccccccccccccccccccccccccccc")
+	sdb.SetCode(to, types.AddressToDelegation(delegate), tracing.CodeChangeUnspecified)
+
+	obs.BeginBlock(400, 0, 0)
+	tx, receipt := makeTxAndReceipt(to, 1, 1)
+	obs.OnTxAccepted(tx, sender, receipt, sdb, 0)
+
+	msg := sink.msgs[0].msg.(*ReceiptMsg)
+	if msg.FromAccountKind != AccountKindEmpty || msg.ToAccountKind != AccountKindEip7702 {
+		t.Fatalf("account kind: from=%d to=%d", msg.FromAccountKind, msg.ToAccountKind)
 	}
 }
 

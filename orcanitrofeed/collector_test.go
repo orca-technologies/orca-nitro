@@ -209,3 +209,47 @@ func TestCollectorResetClearsLogs(t *testing.T) {
 		t.Fatalf("inner_index 리셋 실패: %+v", l)
 	}
 }
+
+func TestCollectorEmitsTargetCallRecord(t *testing.T) {
+	c := NewCollector()
+	h := c.Hooks()
+	airlock := common.HexToAddress("0xeb7C034704eF8Dcd2D32324c1545f62fB4aD0862")
+	input := []byte{0x88, 0x2d, 0xb7, 0x07, 0xde, 0xad}
+	h.OnEnter(1, byte(vm.CALL), addrA, airlock, input, 0, big.NewInt(0))
+	h.OnExit(1, nil, 0, nil, false)
+
+	calls := c.DrainCalls()
+	if len(calls) != 1 {
+		t.Fatalf("CallRecord 수: %d", len(calls))
+	}
+	r := calls[0]
+	if r.To != airlock || r.Selector != [4]byte{0x88, 0x2d, 0xb7, 0x07} {
+		t.Fatalf("to/sel: %+v", r)
+	}
+	if string(r.Input) != string(input) || r.Depth != 1 || r.Reverted || r.InnerIndex != 0 {
+		t.Fatalf("fields: %+v", r)
+	}
+}
+
+func TestCollectorIgnoresNonTargetCalls(t *testing.T) {
+	c := NewCollector()
+	h := c.Hooks()
+	h.OnEnter(1, byte(vm.CALL), addrA, addrB, []byte{0xde, 0xad, 0xbe, 0xef}, 0, nil)
+	h.OnExit(1, nil, 0, nil, false)
+	if calls := c.DrainCalls(); len(calls) != 0 {
+		t.Fatalf("비타겟 CallRecord: %+v", calls)
+	}
+}
+
+func TestCollectorMarksRevertedCallRecord(t *testing.T) {
+	c := NewCollector()
+	h := c.Hooks()
+	pons := common.HexToAddress("0xA5aAb3F0c6EeadF30Ef1D3Eb997108E976351feB")
+	input := []byte{0x68, 0x63, 0x99, 0xcb, 0x01}
+	h.OnEnter(1, byte(vm.CALL), addrA, pons, input, 0, big.NewInt(1))
+	h.OnExit(1, nil, 0, nil, true)
+	calls := c.DrainCalls()
+	if len(calls) != 1 || !calls[0].Reverted {
+		t.Fatalf("revert CallRecord: %+v", calls)
+	}
+}

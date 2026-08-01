@@ -3,7 +3,7 @@ package orcanitrofeed
 import "github.com/ethereum/go-ethereum/common"
 
 // TARGETS — TOKEN_METADATA §1 `(to, selector)` allowlist.
-// Flap: multi-step (commit/stage/newTokenV*); best create SoT = newTokenV7.
+// Flap: multi-step (commit/stage/newTokenV2–V7); meta decode on newTokenV*.
 
 type targetKey struct {
 	to  common.Address
@@ -30,8 +30,16 @@ func init() {
 	add("0xC25c1e209313856e3A66FDd3aFd98aBe90B047F6", [4]byte{0xc2, 0xf0, 0xcd, 0x4b}) // RobinPad
 	add("0x9634AA5EB176064D9D04d6282E3D4a0A2456F01c", [4]byte{0x94, 0xae, 0xd7, 0xd0}) // Runner
 	add("0xD69A9fDee44a42c8E614128FEda486128cB27222", [4]byte{0x34, 0xfb, 0x85, 0x89}) // RobinFun
-	// Flap Portal proxy — newTokenV7 (older V2–V6 / commit / stage not TARGET'd)
-	add("0x26605f322f7fF986f381bB9A6e3f5DAb0bEaEb09", [4]byte{0x87, 0xef, 0x5b, 0x30})
+	// Flap Portal proxy — newTokenV2–V7 + commit/stage V5 (emit; feeder decodes V2–V7 meta)
+	flapPortal := "0x26605f322f7fF986f381bB9A6e3f5DAb0bEaEb09"
+	add(flapPortal, [4]byte{0x0b, 0xa6, 0x32, 0x4e}) // newTokenV2
+	add(flapPortal, [4]byte{0x7e, 0x15, 0x67, 0x6e}) // newTokenV3
+	add(flapPortal, [4]byte{0x3b, 0xa6, 0xf2, 0x6a}) // newTokenV4
+	add(flapPortal, [4]byte{0x2e, 0x2f, 0xdb, 0xd9}) // newTokenV5
+	add(flapPortal, [4]byte{0x8c, 0xb5, 0x77, 0x2c}) // newTokenV6
+	add(flapPortal, [4]byte{0x87, 0xef, 0x5b, 0x30}) // newTokenV7
+	add(flapPortal, [4]byte{0x5d, 0x29, 0xf9, 0xf2}) // commitNewTokenV5
+	add(flapPortal, [4]byte{0x9d, 0x55, 0xbd, 0xe4}) // stageNewTokenV5
 }
 
 func isTarget(to common.Address, input []byte) (sel [4]byte, ok bool) {

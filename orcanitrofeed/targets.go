@@ -16,8 +16,9 @@ func init() {
 	add := func(toHex string, sel [4]byte) {
 		targets[targetKey{to: common.HexToAddress(toHex), sel: sel}] = struct{}{}
 	}
-	// Airlock.create(CreateParams)
+	// Airlock.create(CreateParams) — two deployments on RHC
 	add("0xeb7C034704eF8Dcd2D32324c1545f62fB4aD0862", [4]byte{0x88, 0x2d, 0xb7, 0x07})
+	add("0x22e99278308b393ea1260859b181ad7e78f5eeed", [4]byte{0x88, 0x2d, 0xb7, 0x07})
 	// NOXA / Pons launchToken (shared ABI)
 	selLaunchToken := [4]byte{0x68, 0x63, 0x99, 0xcb}
 	add("0xD9eC2db5f3D1b236843925949fe5bd8a3836FCcB", selLaunchToken) // NOXA

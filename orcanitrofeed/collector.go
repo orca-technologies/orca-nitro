@@ -16,12 +16,13 @@ type Collector struct {
 
 	// 현재 tx 수집 상태
 	// PERF:MEM-GROW
-	//   cost: mem=O(N_transfers+N_logs)·~120B, N~1e0..1e2/tx → 재사용으로 상쇄
-	//   note: records·logs는 Drain 후 재사용 (capacity 유지)
+	//   cost: mem=O(N_transfers+N_logs+N_calls)·~120B, N~1e0..1e2/tx → 재사용으로 상쇄
+	//   note: records·logs·calls는 Drain 후 재사용 (capacity 유지)
 	records []TransferRecord
 	logs    []LogRecord
-	// tx 안 방출 순번 — 로그와 transfer가 공유한다. revert된 항목도 번호를 소비하므로
-	// 살아남은 항목의 상대 순서가 보존된다.
+	calls   []CallRecord
+	// tx 안 방출 순번 — 로그·transfer·CallRecord가 공유한다. revert된 항목도
+	// 번호를 소비하므로 살아남은 항목의 상대 순서가 보존된다.
 	innerNext uint16
 	frames    []frameMark // open frame 스택
 	pending   *pendingSub // 쌍 대기 중인 Transfer sub 이벤트
@@ -33,9 +34,10 @@ type Collector struct {
 }
 
 type frameMark struct {
-	depth       uint16
-	startIdx    int // 이 frame 진입 시점의 records 길이
-	logStartIdx int // 이 frame 진입 시점의 logs 길이
+	depth        uint16
+	startIdx     int // 이 frame 진입 시점의 records 길이
+	logStartIdx  int // 이 frame 진입 시점의 logs 길이
+	callStartIdx int // 이 frame 진입 시점의 calls 길이
 }
 
 type pendingSub struct {
@@ -65,6 +67,7 @@ func NewCollector() *Collector {
 		hooks:     nil,
 		records:   nil,
 		logs:      nil,
+		calls:     nil,
 		innerNext: 0,
 		frames:    nil,
 		pending:   nil,
@@ -104,6 +107,7 @@ func (c *Collector) TxSender() common.Address { return c.txFrom }
 func (c *Collector) Reset() {
 	c.records = c.records[:0]
 	c.logs = c.logs[:0]
+	c.calls = c.calls[:0]
 	c.innerNext = 0
 	c.frames = c.frames[:0]
 	c.pending = nil
@@ -113,6 +117,12 @@ func (c *Collector) Reset() {
 // 반환 슬라이스는 다음 tx 수집 시작(Reset) 전까지만 유효 — 이후 재사용된다.
 func (c *Collector) DrainLogs() []LogRecord {
 	return c.logs
+}
+
+// DrainCalls — TARGET CallRecord (revert 플래그 포함)를 방출 순서대로 반환한다.
+// 반환 슬라이스는 다음 tx 수집 시작(Reset) 전까지만 유효 — 이후 재사용된다.
+func (c *Collector) DrainCalls() []CallRecord {
+	return c.calls
 }
 
 func (c *Collector) onLog(log *types.Log) {
@@ -157,14 +167,36 @@ func (c *Collector) onTxEndHook(receipt *types.Receipt, err error) {
 	c.Reset()
 }
 
-func (c *Collector) onEnter(depth int, _ byte, _ common.Address, _ common.Address, _ []byte, _ uint64, _ *big.Int) {
+func (c *Collector) onEnter(depth int, _ byte, _ common.Address, to common.Address, input []byte, _ uint64, value *big.Int) {
 	c.flushPending()
 	// #nosec G115
 	c.frames = append(c.frames, frameMark{
-		depth:       uint16(depth),
-		startIdx:    len(c.records),
-		logStartIdx: len(c.logs),
+		depth:        uint16(depth),
+		startIdx:     len(c.records),
+		logStartIdx:  len(c.logs),
+		callStartIdx: len(c.calls),
 	})
+	if sel, ok := isTarget(to, input); ok {
+		var valueBytes []byte
+		if value != nil && value.Sign() != 0 {
+			valueBytes = value.Bytes()
+		}
+		// PERF:ALLOC
+		//   cost: mem=O(len(input))/TARGET hit, N_hits~0..few/tx → N 불확실
+		//   note: TARGET input 복사 — tracing 버퍼 재사용 방지
+		inputCopy := make([]byte, len(input))
+		copy(inputCopy, input)
+		// #nosec G115
+		c.calls = append(c.calls, CallRecord{
+			To:         to,
+			Selector:   sel,
+			Input:      inputCopy,
+			Value:      valueBytes,
+			Depth:      uint16(depth),
+			Reverted:   false,
+			InnerIndex: c.nextInner(),
+		})
+	}
 }
 
 func (c *Collector) onExit(_ int, _ []byte, _ uint64, _ error, reverted bool) {
@@ -175,9 +207,12 @@ func (c *Collector) onExit(_ int, _ []byte, _ uint64, _ error, reverted bool) {
 	frame := c.frames[len(c.frames)-1]
 	c.frames = c.frames[:len(c.frames)-1]
 	if reverted {
-		// transfer는 "시도됐다 무효화됨"이 신호가 되므로 플래그만 세운다.
+		// transfer·CallRecord는 "시도됐다 무효화됨"이 신호가 되므로 플래그만 세운다.
 		for i := frame.startIdx; i < len(c.records); i++ {
 			c.records[i].Reverted = true
+		}
+		for i := frame.callStartIdx; i < len(c.calls); i++ {
+			c.calls[i].Reverted = true
 		}
 		// 로그는 receipt.Logs에 남지 않으므로 버린다 — 시퀀스 번호는 이미 소비됐다.
 		c.logs = c.logs[:frame.logStartIdx]

@@ -22,7 +22,8 @@ func goldenMessages() map[string]msgp.Marshaler {
 		"receipt": &ReceiptMsg{
 			Seq: 7, BlockNumber: 123456, TxIndex: 2,
 			L2Timestamp: 1753689600, TxType: 2,
-			From: addr(0x01), To: addr(0x02), ToIsContract: true,
+			From: addr(0x01), To: addr(0x02),
+			FromAccountKind: AccountKindEmpty, ToAccountKind: AccountKindContract,
 			Nonce: 9, Gas: 21000, EffectiveGasPrice: []byte{0x3b, 0x9a, 0xca, 0x00},
 			Value:    []byte{0x0d, 0xe0, 0xb6, 0xb3, 0xa7, 0x64, 0x00, 0x00},
 			Calldata: []byte{0xde, 0xad, 0xbe, 0xef}, Status: 1,
@@ -34,6 +35,11 @@ func goldenMessages() map[string]msgp.Marshaler {
 				Value:           []byte{0x0d, 0xe0, 0xb6, 0xb3, 0xa7, 0x64, 0x00, 0x00},
 				PostBalanceFrom: []byte{0x01}, PostBalanceTo: []byte{0x02},
 				Depth: 0, Reverted: false, InnerIndex: 0,
+			}},
+			Calls: []CallRecord{{
+				To: addr(0xeb), Selector: [4]byte{0x88, 0x2d, 0xb7, 0x07},
+				Input: []byte{0x88, 0x2d, 0xb7, 0x07, 0xca}, Value: nil,
+				Depth: 1, Reverted: false, InnerIndex: 2,
 			}},
 			EmittedAtNs: 1_753_689_600_123_456_789,
 		},

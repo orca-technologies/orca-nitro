@@ -220,7 +220,7 @@ func TestOrcaNitroFeedLiveDispatch(t *testing.T) {
 
 	// (1) 검증: tx 필드 + depth-0 transfer + post balance
 	msg1 := store.waitReceipt(t, receipt1.BlockNumber.Uint64(), uint32(receipt1.TransactionIndex))
-	if common.Address(msg1.To) != user2 || msg1.Status != 1 || msg1.ToIsContract {
+	if common.Address(msg1.To) != user2 || msg1.Status != 1 || msg1.ToAccountKind != orcanitrofeed.AccountKindEmpty {
 		Fatal(t, "tx1 필드 불일치: ", msg1)
 	}
 	if new(big.Int).SetBytes(msg1.Value).Cmp(transferValue) != 0 {
@@ -247,10 +247,10 @@ func TestOrcaNitroFeedLiveDispatch(t *testing.T) {
 		Fatal(t, "BlockSeal 불일치: ", seal)
 	}
 
-	// (3) 검증: internal transfer (depth>=1) + ToIsContract
+	// (3) 검증: internal transfer (depth>=1) + ToAccountKind=Contract
 	msg3 := store.waitReceipt(t, receipt3.BlockNumber.Uint64(), uint32(receipt3.TransactionIndex))
-	if !msg3.ToIsContract || common.Address(msg3.To) != multiAddr {
-		Fatal(t, "tx3 contract 플래그 불일치: ", msg3)
+	if msg3.ToAccountKind != orcanitrofeed.AccountKindContract || common.Address(msg3.To) != multiAddr {
+		Fatal(t, "tx3 account kind 불일치: ", msg3)
 	}
 	var foundOuter, foundInner bool
 	for _, tr := range msg3.Transfers {
@@ -388,7 +388,7 @@ func testOrcaNitroFeedSweep(t *testing.T, scheme string) {
 	}
 
 	msg3 := store.receipt(receipt3.BlockNumber.Uint64(), uint32(receipt3.TransactionIndex))
-	if msg3 == nil || msg3.BlockNumber != receipt3.BlockNumber.Uint64() || !msg3.ToIsContract {
+	if msg3 == nil || msg3.BlockNumber != receipt3.BlockNumber.Uint64() || msg3.ToAccountKind != orcanitrofeed.AccountKindContract {
 		Fatal(t, "sweep tx3 불일치: ", msg3)
 	}
 	var foundInner bool

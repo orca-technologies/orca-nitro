@@ -22,10 +22,13 @@ type BlockObserver struct {
 	sink      Sink
 	mode      string // "tx" | "block"
 	collector *Collector
+	tracker   *SameTimestampTracker
 
-	blockNumber   uint64
-	l2Timestamp   uint64
-	l1BlockNumber uint64
+	blockNumber         uint64
+	l2Timestamp         uint64
+	l1BlockNumber       uint64
+	sameTimestampIndex  uint32
+	dispatchedReceipts  uint32
 
 	// PERF:MEM-GROW
 	//   cost: mem=O(N_addrs)/block, N~1e0..1e2 → 블록마다 clear
@@ -36,16 +39,14 @@ type BlockObserver struct {
 	pendingMsgs []*ReceiptMsg
 }
 
-func NewBlockObserver(sink Sink, mode string) *BlockObserver {
+func NewBlockObserver(sink Sink, mode string, lookback uint64, headerTime HeaderTimeFunc) *BlockObserver {
 	return &BlockObserver{
-		sink:          sink,
-		mode:          mode,
-		collector:     NewCollector(),
-		blockNumber:   0,
-		l2Timestamp:   0,
-		l1BlockNumber: 0,
-		codeCache:     make(map[common.Address]uint8),
-		pendingMsgs:   nil,
+		sink:        sink,
+		mode:        mode,
+		collector:   NewCollector(),
+		tracker:     NewSameTimestampTracker(lookback, headerTime),
+		codeCache:   make(map[common.Address]uint8),
+		pendingMsgs: nil,
 	}
 }
 
@@ -55,6 +56,8 @@ func (o *BlockObserver) BeginBlock(blockNumber uint64, l2Timestamp uint64, l1Blo
 	o.blockNumber = blockNumber
 	o.l2Timestamp = l2Timestamp
 	o.l1BlockNumber = l1BlockNumber
+	o.sameTimestampIndex = o.tracker.Advance(blockNumber, l2Timestamp)
+	o.dispatchedReceipts = 0
 	clear(o.codeCache)
 	o.pendingMsgs = o.pendingMsgs[:0]
 	o.collector.Reset()
@@ -69,6 +72,7 @@ func (o *BlockObserver) EVMHooks() *tracing.Hooks {
 // internal tx(ArbitrumInternalTxType)는 호출자가 걸러서 호출하지 않는다.
 func (o *BlockObserver) OnTxAccepted(tx *types.Transaction, sender common.Address, receipt *types.Receipt, statedb *state.StateDB, txIndex int) {
 	msg := o.buildReceiptMsg(tx, sender, receipt, statedb, txIndex)
+	o.dispatchedReceipts++
 	if o.mode == "tx" {
 		o.sink.Enqueue(MsgReceipt, msg)
 	} else {
@@ -79,20 +83,21 @@ func (o *BlockObserver) OnTxAccepted(tx *types.Transaction, sender common.Addres
 
 // OnBlockSealed — 블록 seal 직후 (ProduceBlockAdvanced 반환 직전) 호출.
 func (o *BlockObserver) OnBlockSealed(block *types.Block) {
-	if o.mode == "tx" {
-		seal := &BlockSealMsg{
-			Seq:         0,
-			BlockNumber: block.NumberU64(),
-			// #nosec G115
-			TxCount: uint32(len(block.Transactions())),
+	if o.mode != "tx" {
+		for _, msg := range o.pendingMsgs {
+			o.sink.Enqueue(MsgReceipt, msg)
 		}
-		o.sink.Enqueue(MsgBlockSeal, seal)
-		return
+		o.pendingMsgs = o.pendingMsgs[:0]
 	}
-	for _, msg := range o.pendingMsgs {
-		o.sink.Enqueue(MsgReceipt, msg)
-	}
-	o.pendingMsgs = o.pendingMsgs[:0]
+	// #nosec G115
+	txCount := uint32(len(block.Transactions()))
+	o.sink.Enqueue(MsgBlockSeal, &BlockSealMsg{
+		Seq:                0,
+		BlockNumber:        block.NumberU64(),
+		TxCount:            txCount,
+		SameTimestampIndex: o.sameTimestampIndex,
+		ReceiptCount:       o.dispatchedReceipts,
+	})
 }
 
 // OnAppendFailed — appendBlock(DB commit) 실패 시 invalidation 통지.
@@ -103,7 +108,6 @@ func (o *BlockObserver) OnAppendFailed(blockNumber uint64) {
 func (o *BlockObserver) buildReceiptMsg(tx *types.Transaction, sender common.Address, receipt *types.Receipt, statedb *state.StateDB, txIndex int) *ReceiptMsg {
 	var transfers []TransferRecord
 	if recs := o.collector.Drain(); len(recs) > 0 {
-		// Drain 버퍼는 다음 tx에서 재사용되므로 복사 (내부 []byte는 이벤트별 신규 할당이라 공유 안전)
 		transfers = make([]TransferRecord, len(recs))
 		copy(transfers, recs)
 	}
@@ -117,13 +121,13 @@ func (o *BlockObserver) buildReceiptMsg(tx *types.Transaction, sender common.Add
 		calls = make([]WhitelistedCallRecord, len(cs))
 		copy(calls, cs)
 	}
-	return newReceiptMsg(o.blockNumber, o.l2Timestamp, o.l1BlockNumber, txIndex, tx, sender, receipt, transfers, logs, calls,
+	return newReceiptMsg(o.blockNumber, o.l2Timestamp, o.l1BlockNumber, o.sameTimestampIndex, txIndex, tx, sender, receipt, transfers, logs, calls,
 		func(addr common.Address) uint8 { return accountKindCached(statedb, o.codeCache, addr) })
 }
 
 // newReceiptMsg — live(BlockObserver)·sweep(SweepObserver) 공용 메시지 조립.
 // transfers/calls는 호출자가 소유권을 넘긴 슬라이스여야 한다 (재사용 버퍼 금지).
-func newReceiptMsg(blockNumber, l2Timestamp, l1BlockNumber uint64, txIndex int, tx *types.Transaction, sender common.Address, receipt *types.Receipt, transfers []TransferRecord, logs []LogRecord, calls []WhitelistedCallRecord, accountKind func(common.Address) uint8) *ReceiptMsg {
+func newReceiptMsg(blockNumber, l2Timestamp, l1BlockNumber uint64, sameTimestampIndex uint32, txIndex int, tx *types.Transaction, sender common.Address, receipt *types.Receipt, transfers []TransferRecord, logs []LogRecord, calls []WhitelistedCallRecord, accountKind func(common.Address) uint8) *ReceiptMsg {
 	// PERF:ALLOC
 	//   cost: mem=O(1)·struct + O(N_logs+N_transfers+N_calls) 슬라이스/tx, N~1e0..1e2 → N 불확실
 	//   note: msg는 writer가 비동기 직렬화하므로 tx-scope 버퍼 재사용 불가
@@ -131,29 +135,30 @@ func newReceiptMsg(blockNumber, l2Timestamp, l1BlockNumber uint64, txIndex int, 
 		Seq:         0,
 		BlockNumber: blockNumber,
 		// #nosec G115
-		TxIndex:           uint32(txIndex),
-		L2Timestamp:       l2Timestamp,
-		TxType:            tx.Type(),
-		From:              sender,
-		To:                [20]byte{},
-		FromAccountKind:   accountKind(sender),
-		ToAccountKind:     AccountKindEmpty,
-		ContractAddress:   receipt.ContractAddress,
-		Nonce:             tx.Nonce(),
-		Gas:               tx.Gas(),
-		EffectiveGasPrice: nil,
-		Value:             tx.Value().Bytes(),
-		Calldata:          tx.Data(),
-		Status:            receipt.Status,
-		GasUsed:           receipt.GasUsed,
-		CumulativeGasUsed: receipt.CumulativeGasUsed,
-		GasUsedForL1:      receipt.GasUsedForL1,
-		L1BlockNumber:     l1BlockNumber,
-		Logs:              nil,
-		Transfers:         transfers,
-		Calls:             calls,
+		TxIndex:            uint32(txIndex),
+		L2Timestamp:        l2Timestamp,
+		TxType:             tx.Type(),
+		From:               sender,
+		To:                 [20]byte{},
+		FromAccountKind:    accountKind(sender),
+		ToAccountKind:      AccountKindEmpty,
+		ContractAddress:    receipt.ContractAddress,
+		Nonce:              tx.Nonce(),
+		Gas:                tx.Gas(),
+		EffectiveGasPrice:  nil,
+		Value:              tx.Value().Bytes(),
+		Calldata:           tx.Data(),
+		Status:             receipt.Status,
+		GasUsed:            receipt.GasUsed,
+		CumulativeGasUsed:  receipt.CumulativeGasUsed,
+		GasUsedForL1:       receipt.GasUsedForL1,
+		L1BlockNumber:      l1BlockNumber,
+		Logs:               nil,
+		Transfers:          transfers,
+		Calls:              calls,
 		// #nosec G115
-		EmittedAtNs: uint64(time.Now().UnixNano()),
+		EmittedAtNs:        uint64(time.Now().UnixNano()),
+		SameTimestampIndex: sameTimestampIndex,
 	}
 	if to := tx.To(); to != nil {
 		msg.To = *to
@@ -162,9 +167,6 @@ func newReceiptMsg(blockNumber, l2Timestamp, l1BlockNumber uint64, txIndex int, 
 	if receipt.EffectiveGasPrice != nil {
 		msg.EffectiveGasPrice = receipt.EffectiveGasPrice.Bytes()
 	}
-	// collector가 관측한 로그를 쓴다 (inner_index 보유). revert 필터링까지 끝난
-	// 상태라 receipt.Logs와 개수가 같아야 한다 — 어긋나면 관측 누락이므로
-	// 경고하고 receipt.Logs로 폴백한다 (순서 정보는 잃되 데이터는 지킨다).
 	if len(logs) == len(receipt.Logs) {
 		msg.Logs = logs
 	} else {

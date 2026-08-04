@@ -374,7 +374,7 @@ func testOrcaNitroFeedSweep(t *testing.T, scheme string) {
 	blockchain := builder.L2.ExecNode.Backend.ArbInterface().BlockChain()
 	executor, err := blocksreexecutor.New(&c, blockchain, builder.L2.ExecNode.ExecutionDB)
 	Require(t, err)
-	executor.SetOrcaSink(store)
+	executor.SetOrcaSink(store, 0)
 	executor.Start(ctx)
 	Require(t, executor.WaitForReExecution(ctx))
 

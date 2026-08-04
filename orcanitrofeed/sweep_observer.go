@@ -16,6 +16,7 @@ import (
 type SweepObserver struct {
 	sink      Sink
 	collector *Collector
+	tracker   *SameTimestampTracker
 	// dispatch 대상 범위 (config에서 받은 원본 [start, end] 목록).
 	// 재실행은 pre-state 확보를 위해 range 이전 블록도 실행하므로 범위 밖은 dispatch하지 않는다.
 	ranges [][2]uint64
@@ -31,10 +32,11 @@ type txCapture struct {
 	calls     []WhitelistedCallRecord
 }
 
-func NewSweepObserver(sink Sink, ranges [][2]uint64) *SweepObserver {
+func NewSweepObserver(sink Sink, ranges [][2]uint64, lookback uint64, headerTime HeaderTimeFunc) *SweepObserver {
 	o := &SweepObserver{
 		sink:      sink,
 		collector: NewCollector(),
+		tracker:   NewSameTimestampTracker(lookback, headerTime),
 		ranges:    ranges,
 		txCaps:    make(map[common.Hash]*txCapture),
 	}
@@ -67,10 +69,12 @@ func (o *SweepObserver) Hooks() *tracing.Hooks { return o.collector.Hooks() }
 func (o *SweepObserver) OnBlockExecuted(block *types.Block, receipts types.Receipts, statedb *state.StateDB) {
 	defer clear(o.txCaps)
 	blockNumber := block.NumberU64()
+	index := o.tracker.Advance(blockNumber, block.Time())
 	if !o.inRange(blockNumber) {
 		return
 	}
 	codeCache := make(map[common.Address]uint8)
+	var receiptCount uint32
 	for i, tx := range block.Transactions() {
 		if tx.Type() == types.ArbitrumInternalTxType {
 			continue
@@ -89,10 +93,20 @@ func (o *SweepObserver) OnBlockExecuted(block *types.Block, receipts types.Recei
 			calls = cp.calls
 		}
 		l1BlockNumber := types.DeserializeHeaderExtraInformation(block.Header()).L1BlockNumber
-		msg := newReceiptMsg(blockNumber, block.Time(), l1BlockNumber, i, tx, sender, receipts[i], transfers, logs, calls,
+		msg := newReceiptMsg(blockNumber, block.Time(), l1BlockNumber, index, i, tx, sender, receipts[i], transfers, logs, calls,
 			func(addr common.Address) uint8 { return accountKindCached(statedb, codeCache, addr) })
 		o.sink.Enqueue(MsgReceipt, msg)
+		receiptCount++
 	}
+	// #nosec G115
+	txCount := uint32(len(block.Transactions()))
+	o.sink.Enqueue(MsgBlockSeal, &BlockSealMsg{
+		Seq:                0,
+		BlockNumber:        blockNumber,
+		TxCount:            txCount,
+		SameTimestampIndex: index,
+		ReceiptCount:       receiptCount,
+	})
 }
 
 // OnRangeDone — worker chunk [start, end] 재실행 완료 마커.

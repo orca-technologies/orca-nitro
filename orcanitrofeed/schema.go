@@ -111,13 +111,21 @@ type ReceiptMsg struct {
 	// 방출 시각이 보존된다 — reader의 live feed ts 기준. sweep 재실행에선
 	// 재실행 시각이므로 의미 없음 (reader가 l2 timestamp 합성 사용).
 	EmittedAtNs uint64
+	// 같은 L2Timestamp(header unix sec)를 가진 연속 블록 안 0-based index.
+	// feed timestamp_ns order의 block_rel (5 bit, cap 31).
+	SameTimestampIndex uint32
 }
 
 //msgp:tuple BlockSealMsg
 type BlockSealMsg struct {
 	Seq         uint64
 	BlockNumber uint64
-	TxCount     uint32 // 블록에 최종 포함된 tx 수 (internal tx 포함) — tx 모드 정합 확인용
+	// 블록에 최종 포함된 tx 수 (internal tx 포함).
+	TxCount uint32
+	// 같은 L2Timestamp 연속 블록 안 0-based index (ReceiptMsg와 동일).
+	SameTimestampIndex uint32
+	// 이번 블록에서 dispatch한 ReceiptMsg 수 (internal 제외).
+	ReceiptCount uint32
 }
 
 //msgp:tuple InvalidationMsg

@@ -14,8 +14,8 @@ func (z *BlockSealMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 3 {
-		err = msgp.ArrayError{Wanted: 3, Got: zb0001}
+	if zb0001 != 5 {
+		err = msgp.ArrayError{Wanted: 5, Got: zb0001}
 		return
 	}
 	z.Seq, err = dc.ReadUint64()
@@ -33,13 +33,23 @@ func (z *BlockSealMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 		err = msgp.WrapError(err, "TxCount")
 		return
 	}
+	z.SameTimestampIndex, err = dc.ReadUint32()
+	if err != nil {
+		err = msgp.WrapError(err, "SameTimestampIndex")
+		return
+	}
+	z.ReceiptCount, err = dc.ReadUint32()
+	if err != nil {
+		err = msgp.WrapError(err, "ReceiptCount")
+		return
+	}
 	return
 }
 
 // EncodeMsg implements msgp.Encodable
-func (z BlockSealMsg) EncodeMsg(en *msgp.Writer) (err error) {
-	// array header, size 3
-	err = en.Append(0x93)
+func (z *BlockSealMsg) EncodeMsg(en *msgp.Writer) (err error) {
+	// array header, size 5
+	err = en.Append(0x95)
 	if err != nil {
 		return
 	}
@@ -58,17 +68,29 @@ func (z BlockSealMsg) EncodeMsg(en *msgp.Writer) (err error) {
 		err = msgp.WrapError(err, "TxCount")
 		return
 	}
+	err = en.WriteUint32(z.SameTimestampIndex)
+	if err != nil {
+		err = msgp.WrapError(err, "SameTimestampIndex")
+		return
+	}
+	err = en.WriteUint32(z.ReceiptCount)
+	if err != nil {
+		err = msgp.WrapError(err, "ReceiptCount")
+		return
+	}
 	return
 }
 
 // MarshalMsg implements msgp.Marshaler
-func (z BlockSealMsg) MarshalMsg(b []byte) (o []byte, err error) {
+func (z *BlockSealMsg) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.Require(b, z.Msgsize())
-	// array header, size 3
-	o = append(o, 0x93)
+	// array header, size 5
+	o = append(o, 0x95)
 	o = msgp.AppendUint64(o, z.Seq)
 	o = msgp.AppendUint64(o, z.BlockNumber)
 	o = msgp.AppendUint32(o, z.TxCount)
+	o = msgp.AppendUint32(o, z.SameTimestampIndex)
+	o = msgp.AppendUint32(o, z.ReceiptCount)
 	return
 }
 
@@ -80,8 +102,8 @@ func (z *BlockSealMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 3 {
-		err = msgp.ArrayError{Wanted: 3, Got: zb0001}
+	if zb0001 != 5 {
+		err = msgp.ArrayError{Wanted: 5, Got: zb0001}
 		return
 	}
 	z.Seq, bts, err = msgp.ReadUint64Bytes(bts)
@@ -99,13 +121,23 @@ func (z *BlockSealMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 		err = msgp.WrapError(err, "TxCount")
 		return
 	}
+	z.SameTimestampIndex, bts, err = msgp.ReadUint32Bytes(bts)
+	if err != nil {
+		err = msgp.WrapError(err, "SameTimestampIndex")
+		return
+	}
+	z.ReceiptCount, bts, err = msgp.ReadUint32Bytes(bts)
+	if err != nil {
+		err = msgp.WrapError(err, "ReceiptCount")
+		return
+	}
 	o = bts
 	return
 }
 
 // Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
-func (z BlockSealMsg) Msgsize() (s int) {
-	s = 1 + msgp.Uint64Size + msgp.Uint64Size + msgp.Uint32Size
+func (z *BlockSealMsg) Msgsize() (s int) {
+	s = 1 + msgp.Uint64Size + msgp.Uint64Size + msgp.Uint32Size + msgp.Uint32Size + msgp.Uint32Size
 	return
 }
 
@@ -601,8 +633,8 @@ func (z *ReceiptMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 24 {
-		err = msgp.ArrayError{Wanted: 24, Got: zb0001}
+	if zb0001 != 25 {
+		err = msgp.ArrayError{Wanted: 25, Got: zb0001}
 		return
 	}
 	z.Seq, err = dc.ReadUint64()
@@ -764,13 +796,18 @@ func (z *ReceiptMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 		err = msgp.WrapError(err, "EmittedAtNs")
 		return
 	}
+	z.SameTimestampIndex, err = dc.ReadUint32()
+	if err != nil {
+		err = msgp.WrapError(err, "SameTimestampIndex")
+		return
+	}
 	return
 }
 
 // EncodeMsg implements msgp.Encodable
 func (z *ReceiptMsg) EncodeMsg(en *msgp.Writer) (err error) {
-	// array header, size 24
-	err = en.Append(0xdc, 0x0, 0x18)
+	// array header, size 25
+	err = en.Append(0xdc, 0x0, 0x19)
 	if err != nil {
 		return
 	}
@@ -915,14 +952,19 @@ func (z *ReceiptMsg) EncodeMsg(en *msgp.Writer) (err error) {
 		err = msgp.WrapError(err, "EmittedAtNs")
 		return
 	}
+	err = en.WriteUint32(z.SameTimestampIndex)
+	if err != nil {
+		err = msgp.WrapError(err, "SameTimestampIndex")
+		return
+	}
 	return
 }
 
 // MarshalMsg implements msgp.Marshaler
 func (z *ReceiptMsg) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.Require(b, z.Msgsize())
-	// array header, size 24
-	o = append(o, 0xdc, 0x0, 0x18)
+	// array header, size 25
+	o = append(o, 0xdc, 0x0, 0x19)
 	o = msgp.AppendUint64(o, z.Seq)
 	o = msgp.AppendUint64(o, z.BlockNumber)
 	o = msgp.AppendUint32(o, z.TxIndex)
@@ -968,6 +1010,7 @@ func (z *ReceiptMsg) MarshalMsg(b []byte) (o []byte, err error) {
 		}
 	}
 	o = msgp.AppendUint64(o, z.EmittedAtNs)
+	o = msgp.AppendUint32(o, z.SameTimestampIndex)
 	return
 }
 
@@ -979,8 +1022,8 @@ func (z *ReceiptMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 24 {
-		err = msgp.ArrayError{Wanted: 24, Got: zb0001}
+	if zb0001 != 25 {
+		err = msgp.ArrayError{Wanted: 25, Got: zb0001}
 		return
 	}
 	z.Seq, bts, err = msgp.ReadUint64Bytes(bts)
@@ -1142,6 +1185,11 @@ func (z *ReceiptMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 		err = msgp.WrapError(err, "EmittedAtNs")
 		return
 	}
+	z.SameTimestampIndex, bts, err = msgp.ReadUint32Bytes(bts)
+	if err != nil {
+		err = msgp.WrapError(err, "SameTimestampIndex")
+		return
+	}
 	o = bts
 	return
 }
@@ -1160,7 +1208,7 @@ func (z *ReceiptMsg) Msgsize() (s int) {
 	for za0006 := range z.Calls {
 		s += z.Calls[za0006].Msgsize()
 	}
-	s += msgp.Uint64Size
+	s += msgp.Uint64Size + msgp.Uint32Size
 	return
 }
 

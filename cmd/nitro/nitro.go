@@ -491,7 +491,7 @@ func mainImpl() int {
 				log.Error("error initializing orca sweep dispatcher", "err", err)
 				return 1
 			}
-			blocksReExecutor.SetOrcaSink(sweepDispatcher)
+			blocksReExecutor.SetOrcaSink(sweepDispatcher, nodeConfig.Execution.OrcaNitroFeed.SameTimestampLookback)
 			// Close는 ring 잔량 flush를 기다린다 — 재실행 완료 후 반드시 호출
 			deferFuncs = append(deferFuncs, sweepDispatcher.Close)
 		}

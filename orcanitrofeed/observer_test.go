@@ -48,7 +48,7 @@ func makeTxAndReceipt(to common.Address, value int64, status uint64) (*types.Tra
 
 func TestObserverTxModeDispatch(t *testing.T) {
 	sink := &memSink{}
-	obs := NewBlockObserver(sink, "tx")
+	obs := NewBlockObserver(sink, "tx", 0, nil)
 	sdb := newTestStateDB(t)
 
 	to := common.HexToAddress("0x1111111111111111111111111111111111111111")
@@ -103,7 +103,7 @@ func TestObserverTxModeDispatch(t *testing.T) {
 
 func TestObserverBlockModeDispatch(t *testing.T) {
 	sink := &memSink{}
-	obs := NewBlockObserver(sink, "block")
+	obs := NewBlockObserver(sink, "block", 0, nil)
 	sdb := newTestStateDB(t)
 	to := common.HexToAddress("0x3333333333333333333333333333333333333333")
 	sender := common.HexToAddress("0x2222222222222222222222222222222222222222")
@@ -120,8 +120,8 @@ func TestObserverBlockModeDispatch(t *testing.T) {
 	block := types.NewBlock(header, &types.Body{Transactions: types.Transactions{tx}}, types.Receipts{receipt}, dummyHasher{})
 	obs.OnBlockSealed(block)
 
-	if len(sink.msgs) != 1 || sink.msgs[0].typ != MsgReceipt {
-		t.Fatalf("seal 후 일괄 dispatch: %+v", sink.msgs)
+	if len(sink.msgs) != 2 || sink.msgs[0].typ != MsgReceipt || sink.msgs[1].typ != MsgBlockSeal {
+		t.Fatalf("seal 후 receipt+BlockSeal: %+v", sink.msgs)
 	}
 	msg := sink.msgs[0].msg.(*ReceiptMsg)
 	if msg.BlockNumber != 200 || msg.TxIndex != 0 {
@@ -130,11 +130,15 @@ func TestObserverBlockModeDispatch(t *testing.T) {
 	if msg.ToAccountKind != AccountKindEmpty {
 		t.Fatalf("EOA인데 ToAccountKind: %+v", msg)
 	}
+	seal := sink.msgs[1].msg.(*BlockSealMsg)
+	if seal.ReceiptCount != 1 || seal.TxCount != 1 {
+		t.Fatalf("seal counts: %+v", seal)
+	}
 }
 
 func TestObserverAppendFailed(t *testing.T) {
 	sink := &memSink{}
-	obs := NewBlockObserver(sink, "tx")
+	obs := NewBlockObserver(sink, "tx", 0, nil)
 	obs.BeginBlock(300, 0, 0)
 	obs.OnAppendFailed(300)
 	if len(sink.msgs) != 1 || sink.msgs[0].typ != MsgInvalidation {
@@ -156,7 +160,7 @@ var _ = uint256.NewInt // keep import if unused later
 
 func TestObserverEmitsCollectorLogsWithInnerIndex(t *testing.T) {
 	sink := &memSink{}
-	obs := NewBlockObserver(sink, "tx")
+	obs := NewBlockObserver(sink, "tx", 0, nil)
 	sdb := newTestStateDB(t)
 	to := common.HexToAddress("0x4444444444444444444444444444444444444444")
 	sender := common.HexToAddress("0x5555555555555555555555555555555555555555")
@@ -182,7 +186,7 @@ func TestObserverEmitsCollectorLogsWithInnerIndex(t *testing.T) {
 
 func TestAccountKindEip7702(t *testing.T) {
 	sink := &memSink{}
-	obs := NewBlockObserver(sink, "tx")
+	obs := NewBlockObserver(sink, "tx", 0, nil)
 	sdb := newTestStateDB(t)
 	to := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	delegate := common.HexToAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
@@ -201,7 +205,7 @@ func TestAccountKindEip7702(t *testing.T) {
 
 func TestObserverFallsBackWhenLogCountMismatches(t *testing.T) {
 	sink := &memSink{}
-	obs := NewBlockObserver(sink, "tx")
+	obs := NewBlockObserver(sink, "tx", 0, nil)
 	sdb := newTestStateDB(t)
 	to := common.HexToAddress("0x6666666666666666666666666666666666666666")
 	sender := common.HexToAddress("0x7777777777777777777777777777777777777777")

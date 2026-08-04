@@ -14,15 +14,19 @@ type Config struct {
 	BufferSize  int           `koanf:"buffer-size"`  // staging ring 슬롯 수 (인코딩 대기열)
 	BufferBytes int           `koanf:"buffer-bytes"` // retention log 바이트 예산
 	BufferAge   time.Duration `koanf:"buffer-age"`   // retention log 최대 보관 시간 (0 = age 제한 없음)
+	// SameTimestampLookback — SameTimestampIndex warm-up 시 헤더를 뒤로 걷는
+	// 최대 칸. feed order block_rel cap(31)을 덮도록 기본 32.
+	SameTimestampLookback uint64 `koanf:"same-timestamp-lookback"`
 }
 
 var DefaultConfig = Config{
-	Enable:      false,
-	SocketPath:  "",
-	Mode:        "tx",
-	BufferSize:  4096,
-	BufferBytes: 1 << 30,          // 1GiB
-	BufferAge:   30 * time.Minute, // wall-clock age cap (바이트 예산과 둘 중 먼저 닿는 쪽)
+	Enable:                false,
+	SocketPath:            "",
+	Mode:                  "tx",
+	BufferSize:            4096,
+	BufferBytes:           1 << 30, // 1GiB
+	BufferAge:             30 * time.Minute,
+	SameTimestampLookback: DefaultSameTimestampLookback,
 }
 
 func ConfigAddOptions(prefix string, f *pflag.FlagSet) {
@@ -32,6 +36,8 @@ func ConfigAddOptions(prefix string, f *pflag.FlagSet) {
 	f.Int(prefix+".buffer-size", DefaultConfig.BufferSize, "encoding staging ring slots (drop-oldest on overflow)")
 	f.Int(prefix+".buffer-bytes", DefaultConfig.BufferBytes, "retained backlog byte budget — encoded frames kept for consumer reconnect replay (drop-oldest)")
 	f.Duration(prefix+".buffer-age", DefaultConfig.BufferAge, "retained backlog max age — drop-oldest when exceeded (0 disables)")
+	f.Uint64(prefix+".same-timestamp-lookback", DefaultConfig.SameTimestampLookback,
+		"max headers to walk back when resolving SameTimestampIndex (block_rel); 0 uses default")
 }
 
 func (c *Config) Validate() error {

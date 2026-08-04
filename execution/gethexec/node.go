@@ -408,7 +408,15 @@ func CreateExecutionNode(
 		if err != nil {
 			return nil, fmt.Errorf("orca-nitro-feed dispatcher: %w", err)
 		}
-		execEngine.SetOrcaObserver(orcanitrofeed.NewBlockObserver(orcaDispatcher, config.OrcaNitroFeed.Mode))
+		headerTime := func(n uint64) (uint64, bool) {
+			h := l2BlockChain.GetHeaderByNumber(n)
+			if h == nil {
+				return 0, false
+			}
+			return h.Time, true
+		}
+		execEngine.SetOrcaObserver(orcanitrofeed.NewBlockObserver(
+			orcaDispatcher, config.OrcaNitroFeed.Mode, config.OrcaNitroFeed.SameTimestampLookback, headerTime))
 		log.Info("orca-nitro-feed dispatch enabled", "socket", config.OrcaNitroFeed.SocketPath, "mode", config.OrcaNitroFeed.Mode)
 	}
 	if config.EnablePrefetchBlock {

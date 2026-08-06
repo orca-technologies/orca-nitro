@@ -19,11 +19,17 @@ func init() {
 	// Airlock.create(CreateParams) — two deployments on RHC
 	add("0xeb7C034704eF8Dcd2D32324c1545f62fB4aD0862", [4]byte{0x88, 0x2d, 0xb7, 0x07})
 	add("0x22e99278308b393ea1260859b181ad7e78f5eeed", [4]byte{0x88, 0x2d, 0xb7, 0x07})
-	// NOXA / Pons launchToken (shared ABI)
+	// NOXA / Pons V3-direct launchToken (shared ABI, selector 0x686399cb)
 	selLaunchToken := [4]byte{0x68, 0x63, 0x99, 0xcb}
 	add("0xD9eC2db5f3D1b236843925949fe5bd8a3836FCcB", selLaunchToken) // NOXA
 	add("0x0c37a24F5D23A486FA692d1500881d698B1F77a4", selLaunchToken) // Pons v1
-	add("0xA5aAb3F0c6EeadF30Ef1D3Eb997108E976351feB", selLaunchToken) // Pons v2
+	add("0xA5aAb3F0c6EeadF30Ef1D3Eb997108E976351feB", selLaunchToken) // Pons V3-direct factory (Dune "v2"; not protocol-v2)
+	// Pons protocol-v2 (bonding curve → Uniswap V4) — distinct from V3-direct 0xA5aA… / 0x686399cb
+	ponsV2Factory := "0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e"
+	add(ponsV2Factory, [4]byte{0xf3, 0x5a, 0xbb, 0xcf}) // launchToken(TokenParams,uint256,address)
+	add(ponsV2Factory, [4]byte{0xa7, 0x21, 0x01, 0xaf}) // launchToken(TokenParams,uint256,address,address[])
+	add(ponsV2Factory, [4]byte{0xd6, 0xa0, 0xee, 0xf5}) // launchTokenFor(…)
+	add("0xe33E9E479dF8802cb0866d5d05258bEc4cF62948", [4]byte{0xf8, 0x5f, 0x8e, 0x41}) // LaunchAndBuy.launchAndBuy
 	// Other pads (nitro emit only — feeder NamedEvent decode may lag)
 	add("0x1B2A2ee9E66862e6323B0D43b26f60235214660A", [4]byte{0xda, 0xcc, 0x2f, 0x97}) // MetaLaunch
 	add("0x985DFae571A0c5c90aC997F08687056D2cE1E46f", [4]byte{0x76, 0x90, 0x30, 0xbf}) // Coinbarrel

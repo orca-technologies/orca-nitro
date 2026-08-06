@@ -241,6 +241,90 @@ func TestCollectorIgnoresNonTargetCalls(t *testing.T) {
 	}
 }
 
+func TestCollectorEmitsPoolsTradeMulticallAndInnerCall(t *testing.T) {
+	c := NewCollector()
+	h := c.Hooks()
+	launcher := common.HexToAddress("0x0000FffFBE8efE702c8703aE3477FF5dE3d319C0")
+	outer := []byte{0xac, 0x96, 0x50, 0xd8, 0x11} // multicall(bytes[])
+	inner := []byte{0xb6, 0x98, 0x2b, 0x48, 0x22} // distributeToken(...)
+
+	// EOA가 launcher를 직접 호출 (depth 0) → multicall이 자기 자신에게 delegatecall (depth 1).
+	// delegatecall의 to는 실행되는 코드 주소이므로 둘 다 launcher다.
+	h.OnEnter(0, byte(vm.CALL), addrA, launcher, outer, 0, big.NewInt(0))
+	h.OnEnter(1, byte(vm.DELEGATECALL), launcher, launcher, inner, 0, nil)
+	h.OnExit(1, nil, 0, nil, false)
+	h.OnExit(0, nil, 0, nil, false)
+
+	calls := c.DrainCalls()
+	if len(calls) != 2 {
+		t.Fatalf("래퍼+inner 2건이어야 함: %d (%+v)", len(calls), calls)
+	}
+	if calls[0].To != launcher || calls[0].Selector != [4]byte{0xac, 0x96, 0x50, 0xd8} || calls[0].Depth != 0 {
+		t.Fatalf("multicall 래퍼: %+v", calls[0])
+	}
+	if calls[1].To != launcher || calls[1].Selector != [4]byte{0xb6, 0x98, 0x2b, 0x48} || calls[1].Depth != 1 {
+		t.Fatalf("delegatecall inner distributeToken: %+v", calls[1])
+	}
+	if string(calls[1].Input) != string(inner) {
+		t.Fatalf("inner input 보존: %+v", calls[1])
+	}
+	if calls[0].InnerIndex != 0 || calls[1].InnerIndex != 1 {
+		t.Fatalf("inner_index 순서: %d %d", calls[0].InnerIndex, calls[1].InnerIndex)
+	}
+}
+
+func TestCollectorPoolsTradeDistributeWithNativeSkipsG1(t *testing.T) {
+	c := NewCollector()
+	h := c.Hooks()
+	sel := []byte{0x0e, 0xf8, 0x47, 0xb6} // distributeWithNative(...)
+
+	// G1 launcher에는 이 함수가 없다 — 등록되지 않아야 한다
+	g1 := common.HexToAddress("0x00004c4ccc709Ef590F7C81102C0689F0263D4e9")
+	h.OnEnter(1, byte(vm.CALL), addrA, g1, sel, 0, nil)
+	h.OnExit(1, nil, 0, nil, false)
+	if calls := c.DrainCalls(); len(calls) != 0 {
+		t.Fatalf("G1 distributeWithNative는 TARGET이 아니다: %+v", calls)
+	}
+
+	// G1.5에는 있다
+	c.Reset()
+	g15 := common.HexToAddress("0x7A6C474b4DcD35b72203D2B569EAfE4C9b5C768e")
+	h.OnEnter(1, byte(vm.CALL), addrA, g15, sel, 0, nil)
+	h.OnExit(1, nil, 0, nil, false)
+	if calls := c.DrainCalls(); len(calls) != 1 {
+		t.Fatalf("G1.5 distributeWithNative: %+v", calls)
+	}
+}
+
+func TestCollectorEmitsPoolsTradeRouterEntry(t *testing.T) {
+	c := NewCollector()
+	h := c.Hooks()
+	router := common.HexToAddress("0xa0177CF584E06f4E7876d7bf0b2D5016e0d8a1fa")
+	launcher := common.HexToAddress("0x7A6C474b4DcD35b72203D2B569EAfE4C9b5C768e")
+	launch := []byte{0x27, 0xa1, 0x09, 0x8d, 0x33} // launch(...)
+	create := []byte{0xde, 0xc1, 0x4b, 0xe1, 0x44} // createToken(...)
+
+	// 서드파티 라우터 진입 → 라우터가 launcher를 호출
+	h.OnEnter(0, byte(vm.CALL), addrA, router, launch, 0, big.NewInt(9))
+	h.OnEnter(1, byte(vm.CALL), router, launcher, create, 0, nil)
+	h.OnExit(1, nil, 0, nil, false)
+	h.OnExit(0, nil, 0, nil, false)
+
+	calls := c.DrainCalls()
+	if len(calls) != 2 {
+		t.Fatalf("라우터+launcher 2건이어야 함: %d (%+v)", len(calls), calls)
+	}
+	if calls[0].To != router || calls[0].Selector != [4]byte{0x27, 0xa1, 0x09, 0x8d} {
+		t.Fatalf("라우터 launch: %+v", calls[0])
+	}
+	if big.NewInt(0).SetBytes(calls[0].Value).Int64() != 9 {
+		t.Fatalf("value 보존: %+v", calls[0])
+	}
+	if calls[1].To != launcher || calls[1].Selector != [4]byte{0xde, 0xc1, 0x4b, 0xe1} || calls[1].Depth != 1 {
+		t.Fatalf("launcher createToken: %+v", calls[1])
+	}
+}
+
 func TestCollectorMarksRevertedCallRecord(t *testing.T) {
 	c := NewCollector()
 	h := c.Hooks()

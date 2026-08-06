@@ -4,6 +4,8 @@ import "github.com/ethereum/go-ethereum/common"
 
 // TARGETS — TOKEN_METADATA §1 `(to, selector)` allowlist.
 // Flap: multi-step (commit/stage/newTokenV2–V7); meta decode on newTokenV*.
+// pools.trade: multicall delegatecalls back into the launcher, so one launch
+// emits both the wrapper and its inner calls — consumers must dedupe by tx.
 
 type targetKey struct {
 	to  common.Address
@@ -41,6 +43,26 @@ func init() {
 	add(flapPortal, [4]byte{0x87, 0xef, 0x5b, 0x30}) // newTokenV7
 	add(flapPortal, [4]byte{0x5d, 0x29, 0xf9, 0xf2}) // commitNewTokenV5
 	add(flapPortal, [4]byte{0x9d, 0x55, 0xbd, 0xe4}) // stageNewTokenV5
+	// pools.trade LiquidityLauncher — G2 is current, but G1/G1.5 still take launches
+	ptG2 := "0x0000FffFBE8efE702c8703aE3477FF5dE3d319C0"
+	ptG15 := "0x7A6C474b4DcD35b72203D2B569EAfE4C9b5C768e"
+	ptG1 := "0x00004c4ccc709Ef590F7C81102C0689F0263D4e9"
+	for _, launcher := range []string{ptG2, ptG15, ptG1} {
+		add(launcher, [4]byte{0xac, 0x96, 0x50, 0xd8}) // multicall(bytes[])
+		add(launcher, [4]byte{0xb6, 0x98, 0x2b, 0x48}) // distributeToken(address,(address,uint128,bytes),bytes32)
+		add(launcher, [4]byte{0xde, 0xc1, 0x4b, 0xe1}) // createToken(address,string,string,uint8,uint128,address,bytes) — meta is calldata-only
+	}
+	// distributeWithNative(address,bytes,bytes32,uint256) — G2/G1.5 only, absent from the G1 ABI
+	add(ptG2, [4]byte{0x0e, 0xf8, 0x47, 0xb6})
+	add(ptG15, [4]byte{0x0e, 0xf8, 0x47, 0xb6})
+	// pools.trade third-party router — separate launch entry path (unverified on explorer; sig from on-chain observation)
+	add("0xa0177CF584E06f4E7876d7bf0b2D5016e0d8a1fa", [4]byte{0x27, 0xa1, 0x09, 0x8d}) // launch(string,string,(string,string,string,uint256),uint256,bytes32)
+	// UniversalRouter 0x8876789976dEcBfCbBbe364623C63652db8C0904 execute() is deliberately
+	// NOT a target here. It is the chain-wide swap router (5.5M txs vs 10k on the launcher),
+	// and pools.trade launch detection needs none of it — launches are found on the log axis
+	// and their metadata comes from the launcher calldata above. Add it when the executor
+	// actually needs own/competitor fill attribution, and add BOTH overloads then:
+	// execute(bytes,bytes[],uint256) 0x3593564c and execute(bytes,bytes[]) 0x24856bc3.
 }
 
 func isTarget(to common.Address, input []byte) (sel [4]byte, ok bool) {

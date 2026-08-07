@@ -85,7 +85,7 @@ func init() {
 	// router is 26.3% of launches, all of it top-level). For top-level entries
 	// ReceiptMsg already attributes the router (To is the tx recipient) and
 	// carries its entry-level salt and metadata blob (Calldata is the full
-	// tx.Data(), see newReceiptMsg in observer.go), so there this record only
+	// tx.Data(), see NewReceiptMsg in observer.go), so there this record only
 	// duplicates them. If wire volume matters more, delete this line — no
 	// decoder depends on it.
 	add("0xa0177CF584E06f4E7876d7bf0b2D5016e0d8a1fa", [4]byte{0x27, 0xa1, 0x09, 0x8d}) // launch(string,string,(string,string,string,uint256),uint256,bytes32)

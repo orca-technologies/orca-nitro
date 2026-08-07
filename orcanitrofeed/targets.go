@@ -56,6 +56,18 @@ func init() {
 	add(ptG2, [4]byte{0x0e, 0xf8, 0x47, 0xb6})
 	add(ptG15, [4]byte{0x0e, 0xf8, 0x47, 0xb6})
 	// pools.trade third-party router — separate launch entry path (unverified on explorer; sig from on-chain observation)
+	//
+	// RECORD-ONLY, on purpose: rhc-decode has no calldata decoder for this
+	// selector, so the frame reaches the wire and `named_events_from_calls`
+	// drops it. Nothing is lost by that — the router CALLs into the launcher and
+	// those inner frames match the launcher targets above on their own (TARGET
+	// matching is per-frame), so a router launch still yields createToken and
+	// distributeToken records with the same metadata.
+	//
+	// It is kept rather than removed because this router is 26.3% of launches
+	// and its own calldata carries the entry-level salt and metadata blob, which
+	// is the only place to attribute the router itself if that is ever wanted.
+	// If wire volume matters more, delete this line — no decoder depends on it.
 	add("0xa0177CF584E06f4E7876d7bf0b2D5016e0d8a1fa", [4]byte{0x27, 0xa1, 0x09, 0x8d}) // launch(string,string,(string,string,string,uint256),uint256,bytes32)
 	// UniversalRouter 0x8876789976dEcBfCbBbe364623C63652db8C0904 execute() is deliberately
 	// NOT a target here. It is the chain-wide swap router (5.5M txs vs 10k on the launcher),

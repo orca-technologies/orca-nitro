@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/spf13/pflag"
 
@@ -45,6 +47,11 @@ type Config struct {
 	MinBlocksPerThread uint64 `koanf:"min-blocks-per-thread"`
 	TrieCleanLimit     int    `koanf:"trie-clean-limit"`
 	ValidateMultiGas   bool   `koanf:"validate-multigas"`
+	// path 모드 전용: receipts root·gasUsed 불일치 블록을 fatal 대신 건너뛴다
+	// (기록 + dispatch 생략 + 다음 블록은 fresh state). 불일치 블록은 로그와
+	// MismatchReport 파일에 남는다 — orca-band-patch로 별도 복구.
+	SkipOnMismatch bool   `koanf:"skip-on-mismatch"`
+	MismatchReport string `koanf:"mismatch-report"`
 
 	blocks [][2]uint64
 }
@@ -82,6 +89,8 @@ var DefaultConfig = Config{
 	MinBlocksPerThread: 0,
 	TrieCleanLimit:     0,
 	ValidateMultiGas:   false,
+	SkipOnMismatch:     false,
+	MismatchReport:     "",
 	blocks:             nil,
 }
 
@@ -94,6 +103,8 @@ var TestConfig = Config{
 	TrieCleanLimit:     600,
 	MinBlocksPerThread: 0,
 	ValidateMultiGas:   true,
+	SkipOnMismatch:     false,
+	MismatchReport:     "",
 
 	blocks: [][2]uint64{},
 }
@@ -107,6 +118,8 @@ func ConfigAddOptions(prefix string, f *pflag.FlagSet) {
 	f.Uint64(prefix+".min-blocks-per-thread", DefaultConfig.MinBlocksPerThread, "minimum number of blocks to execute per thread. When mode is random this acts as the size of random block range sample. In path (historic) mode this is the fixed chunk size per worker (default 2000)")
 	f.Int(prefix+".trie-clean-limit", DefaultConfig.TrieCleanLimit, "memory allowance (MB) to use for caching trie nodes in memory")
 	f.Bool(prefix+".validate-multigas", DefaultConfig.ValidateMultiGas, "if set, validate the sum of multi-gas dimensions match the single-gas")
+	f.Bool(prefix+".skip-on-mismatch", DefaultConfig.SkipOnMismatch, "path mode only: on receipts-root/gas-used mismatch, record and skip the block instead of failing the run")
+	f.String(prefix+".mismatch-report", DefaultConfig.MismatchReport, "append skipped mismatch blocks to this file (block=N kind=... got=... want=...)")
 }
 
 // path 모드 chunk 크기 기본값 (min-blocks-per-thread로 재정의 가능).
@@ -141,6 +154,11 @@ type BlocksReExecutor struct {
 	// 실행한다 — hash 모드의 state 전진(FindLastAvailableState)이 불필요.
 	pathMode   bool
 	historicDB state.Database
+
+	// skip-on-mismatch: worker들이 공유하는 report 파일 (nil = 미기록)
+	mismatchMu   sync.Mutex
+	mismatchFile *os.File
+	skippedCount atomic.Uint64
 }
 
 // SetOrcaSink — Start 이전 1회 주입. 설정 시 재실행 블록의 receipt·transfer를 dispatch한다.
@@ -260,6 +278,14 @@ func New(c *Config, blockchain *core.BlockChain, ethDb ethdb.Database) (*BlocksR
 		}
 	}
 
+	var mismatchFile *os.File
+	if c.SkipOnMismatch && c.MismatchReport != "" {
+		var err error
+		mismatchFile, err = os.OpenFile(c.MismatchReport, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			return nil, fmt.Errorf("opening mismatch report %s: %w", c.MismatchReport, err)
+		}
+	}
 	blocksReExecutor = &BlocksReExecutor{
 		StopWaiter:    stopwaiter.StopWaiter{},
 		config:        c,
@@ -276,8 +302,24 @@ func New(c *Config, blockchain *core.BlockChain, ethDb ethdb.Database) (*BlocksR
 		orcaRanges:    orcaRanges,
 		pathMode:      pathMode,
 		historicDB:    historicDB,
+		mismatchMu:    sync.Mutex{},
+		mismatchFile:  mismatchFile,
+		skippedCount:  atomic.Uint64{},
 	}
 	return blocksReExecutor, nil
+}
+
+// recordMismatch — skip-on-mismatch로 건너뛴 블록을 로그·report 파일에 남긴다.
+// 형식은 orca-band-patch --blocks-file이 그대로 파싱한다.
+func (s *BlocksReExecutor) recordMismatch(blockNum uint64, kind string, got, want string) {
+	s.skippedCount.Add(1)
+	log.Warn("skipping mismatched block", "block", blockNum, "kind", kind, "got", got, "want", want)
+	if s.mismatchFile == nil {
+		return
+	}
+	s.mismatchMu.Lock()
+	defer s.mismatchMu.Unlock()
+	fmt.Fprintf(s.mismatchFile, "block=%d kind=%s got=%s want=%s\n", blockNum, kind, got, want)
 }
 
 func logState(header *types.Header, hasState bool) {
@@ -469,9 +511,24 @@ func (s *BlocksReExecutor) reExecuteHistoricBlock(block *types.Block, statedb *s
 	}
 	receipts := result.Receipts
 	if got := types.DeriveSha(receipts, trie.NewStackTrie(nil)); got != block.ReceiptHash() {
+		if s.config.SkipOnMismatch {
+			s.recordMismatch(blockNum, "receipts-root", got.Hex(), block.ReceiptHash().Hex())
+			if orcaObserver != nil {
+				orcaObserver.OnBlockSkipped(block)
+			}
+			// 불일치 실행의 post-state는 신뢰 불가 — 다음 블록은 fresh open
+			return nil, nil
+		}
 		return nil, fmt.Errorf("receipts root mismatch at block %d: got %v want %v", blockNum, got, block.ReceiptHash())
 	}
 	if result.GasUsed != block.GasUsed() {
+		if s.config.SkipOnMismatch {
+			s.recordMismatch(blockNum, "gas-used", fmt.Sprintf("%d", result.GasUsed), fmt.Sprintf("%d", block.GasUsed()))
+			if orcaObserver != nil {
+				orcaObserver.OnBlockSkipped(block)
+			}
+			return nil, nil
+		}
 		return nil, fmt.Errorf("gas used mismatch at block %d: got %d want %d", blockNum, result.GasUsed, block.GasUsed())
 	}
 	if orcaObserver != nil {
@@ -509,9 +566,39 @@ func (s *BlocksReExecutor) implAscending(ctx context.Context, startBlock, endBlo
 	}
 }
 
+// waitForStateIndexing — path archive 복원 직후 state history 인덱싱이 진행 중이면
+// historic read가 전부 "not fully indexed"로 실패한다. 완료까지 폴링 대기한다.
+// remaining==0은 indexer의 done 채널 기준이라 (pathdb indexIniter.remain) inited와
+// race가 없다. index metadata가 freezer tip보다 앞선 복구 상태면 remaining이 0으로
+// 내려오지 않는다 — geth가 "State indexer is in recovery"를 남기며, 스냅샷 재복원이
+// 올바른 대응이다.
+func (s *BlocksReExecutor) waitForStateIndexing(ctx context.Context) error {
+	for {
+		remaining, err := s.blockchain.StateIndexProgress()
+		if err != nil {
+			return fmt.Errorf("state index progress: %w", err)
+		}
+		if remaining == 0 {
+			return nil
+		}
+		log.Info("Waiting for state history indexing before historic reexecution", "remaining", remaining)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Second):
+		}
+	}
+}
+
 // runAscending — path 모드 전체 실행. range들을 시작 블록 오름차순으로 처리하고,
 // 겹치는 range는 이미 커버한 상한(highestCovered) 이후만 실행한다.
 func (s *BlocksReExecutor) runAscending(ctx context.Context) {
+	if err := s.waitForStateIndexing(ctx); err != nil {
+		if ctx.Err() == nil {
+			s.reportFatalErr(fmt.Errorf("blocksReExecutor waiting for state indexing: %w", err))
+		}
+		return
+	}
 	var highestCovered uint64
 	for _, blocks := range s.blocks {
 		if s.fatalReported.Load() || ctx.Err() != nil {
@@ -530,6 +617,9 @@ func (s *BlocksReExecutor) runAscending(ctx context.Context) {
 		}
 		log.Info("BlocksReExecutor successfully completed re-execution of blocks against historic state", "startBlock", lo+1, "endBlock", blocks[1])
 		highestCovered = blocks[1]
+	}
+	if skipped := s.skippedCount.Load(); skipped > 0 {
+		log.Warn("BlocksReExecutor skipped mismatched blocks — recover them with orca-band-patch", "count", skipped, "report", s.config.MismatchReport)
 	}
 }
 

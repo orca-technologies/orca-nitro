@@ -97,6 +97,11 @@ func init() {
 	// execute(bytes,bytes[],uint256) 0x3593564c and execute(bytes,bytes[]) 0x24856bc3.
 }
 
+// TargetCall — allowlist 매칭 공개 래퍼 (bandpatch 등 재구성 경로용).
+func TargetCall(to common.Address, input []byte) (sel [4]byte, ok bool) {
+	return isTarget(to, input)
+}
+
 func isTarget(to common.Address, input []byte) (sel [4]byte, ok bool) {
 	if len(input) < 4 {
 		return sel, false

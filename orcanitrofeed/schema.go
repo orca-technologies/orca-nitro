@@ -126,6 +126,8 @@ type BlockSealMsg struct {
 	SameTimestampIndex uint32
 	// 이번 블록에서 dispatch한 ReceiptMsg 수 (internal 제외).
 	ReceiptCount uint32
+	// 이 L2 블록이 시퀀싱된 L1 block number (ReceiptMsg와 동일 소스).
+	L1BlockNumber uint64
 }
 
 //msgp:tuple InvalidationMsg

@@ -14,8 +14,8 @@ func (z *BlockSealMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 5 {
-		err = msgp.ArrayError{Wanted: 5, Got: zb0001}
+	if zb0001 != 6 {
+		err = msgp.ArrayError{Wanted: 6, Got: zb0001}
 		return
 	}
 	z.Seq, err = dc.ReadUint64()
@@ -43,13 +43,18 @@ func (z *BlockSealMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 		err = msgp.WrapError(err, "ReceiptCount")
 		return
 	}
+	z.L1BlockNumber, err = dc.ReadUint64()
+	if err != nil {
+		err = msgp.WrapError(err, "L1BlockNumber")
+		return
+	}
 	return
 }
 
 // EncodeMsg implements msgp.Encodable
 func (z *BlockSealMsg) EncodeMsg(en *msgp.Writer) (err error) {
-	// array header, size 5
-	err = en.Append(0x95)
+	// array header, size 6
+	err = en.Append(0x96)
 	if err != nil {
 		return
 	}
@@ -78,19 +83,25 @@ func (z *BlockSealMsg) EncodeMsg(en *msgp.Writer) (err error) {
 		err = msgp.WrapError(err, "ReceiptCount")
 		return
 	}
+	err = en.WriteUint64(z.L1BlockNumber)
+	if err != nil {
+		err = msgp.WrapError(err, "L1BlockNumber")
+		return
+	}
 	return
 }
 
 // MarshalMsg implements msgp.Marshaler
 func (z *BlockSealMsg) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.Require(b, z.Msgsize())
-	// array header, size 5
-	o = append(o, 0x95)
+	// array header, size 6
+	o = append(o, 0x96)
 	o = msgp.AppendUint64(o, z.Seq)
 	o = msgp.AppendUint64(o, z.BlockNumber)
 	o = msgp.AppendUint32(o, z.TxCount)
 	o = msgp.AppendUint32(o, z.SameTimestampIndex)
 	o = msgp.AppendUint32(o, z.ReceiptCount)
+	o = msgp.AppendUint64(o, z.L1BlockNumber)
 	return
 }
 
@@ -102,8 +113,8 @@ func (z *BlockSealMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 5 {
-		err = msgp.ArrayError{Wanted: 5, Got: zb0001}
+	if zb0001 != 6 {
+		err = msgp.ArrayError{Wanted: 6, Got: zb0001}
 		return
 	}
 	z.Seq, bts, err = msgp.ReadUint64Bytes(bts)
@@ -131,13 +142,18 @@ func (z *BlockSealMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 		err = msgp.WrapError(err, "ReceiptCount")
 		return
 	}
+	z.L1BlockNumber, bts, err = msgp.ReadUint64Bytes(bts)
+	if err != nil {
+		err = msgp.WrapError(err, "L1BlockNumber")
+		return
+	}
 	o = bts
 	return
 }
 
 // Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
 func (z *BlockSealMsg) Msgsize() (s int) {
-	s = 1 + msgp.Uint64Size + msgp.Uint64Size + msgp.Uint32Size + msgp.Uint32Size + msgp.Uint32Size
+	s = 1 + msgp.Uint64Size + msgp.Uint64Size + msgp.Uint32Size + msgp.Uint32Size + msgp.Uint32Size + msgp.Uint64Size
 	return
 }
 

@@ -74,6 +74,7 @@ func (o *SweepObserver) OnBlockExecuted(block *types.Block, receipts types.Recei
 		return
 	}
 	codeCache := make(map[common.Address]uint8)
+	l1BlockNumber := types.DeserializeHeaderExtraInformation(block.Header()).L1BlockNumber
 	var receiptCount uint32
 	for i, tx := range block.Transactions() {
 		if tx.Type() == types.ArbitrumInternalTxType {
@@ -92,7 +93,6 @@ func (o *SweepObserver) OnBlockExecuted(block *types.Block, receipts types.Recei
 			logs = cp.logs
 			calls = cp.calls
 		}
-		l1BlockNumber := types.DeserializeHeaderExtraInformation(block.Header()).L1BlockNumber
 		msg := newReceiptMsg(blockNumber, block.Time(), l1BlockNumber, index, i, tx, sender, receipts[i], transfers, logs, calls,
 			func(addr common.Address) uint8 { return accountKindCached(statedb, codeCache, addr) })
 		o.sink.Enqueue(MsgReceipt, msg)
@@ -106,6 +106,7 @@ func (o *SweepObserver) OnBlockExecuted(block *types.Block, receipts types.Recei
 		TxCount:            txCount,
 		SameTimestampIndex: index,
 		ReceiptCount:       receiptCount,
+		L1BlockNumber:      l1BlockNumber,
 	})
 }
 

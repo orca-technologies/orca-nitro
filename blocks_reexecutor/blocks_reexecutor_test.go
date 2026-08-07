@@ -108,6 +108,8 @@ func newTestConfig() *Config {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 }
@@ -232,6 +234,8 @@ func TestValidateValidFullConfig(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	if err := c.Validate(); err != nil {
@@ -255,6 +259,8 @@ func TestValidateValidRandomConfig(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	if err := c.Validate(); err != nil {
@@ -275,6 +281,8 @@ func TestValidateModeCaseInsensitive(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	if err := c.Validate(); err != nil {
@@ -295,6 +303,8 @@ func TestValidateInvalidMode(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	err := c.Validate()
@@ -316,6 +326,8 @@ func TestValidateEmptyBlocks(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	err := c.Validate()
@@ -337,6 +349,8 @@ func TestValidateMalformedBlocksJSON(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	err := c.Validate()
@@ -358,6 +372,8 @@ func TestValidateInvalidBlockRange(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	err := c.Validate()
@@ -379,6 +395,8 @@ func TestValidateRoomZero(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	err := c.Validate()
@@ -400,6 +418,8 @@ func TestValidateRoomNegative(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	err := c.Validate()
@@ -422,6 +442,8 @@ func TestValidateDisabledSkipsModeCheck(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	if err := c.Validate(); err != nil {
@@ -439,6 +461,8 @@ func TestValidateMultipleBlockRanges(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	if err := c.Validate(); err != nil {
@@ -459,6 +483,8 @@ func TestValidateSecondRangeInvalid(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	err := c.Validate()
@@ -482,6 +508,8 @@ func TestImplReturnsZeroWhenFatalPreSet(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	s.done = make(chan struct{}, 2)
@@ -507,6 +535,8 @@ func TestImplReturnsStartBlockWhenNoWork(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	s.done = make(chan struct{}, 2)

@@ -122,13 +122,13 @@ func (o *BlockObserver) buildReceiptMsg(tx *types.Transaction, sender common.Add
 		calls = make([]WhitelistedCallRecord, len(cs))
 		copy(calls, cs)
 	}
-	return newReceiptMsg(o.blockNumber, o.l2Timestamp, o.l1BlockNumber, o.sameTimestampIndex, txIndex, tx, sender, receipt, transfers, logs, calls,
+	return NewReceiptMsg(o.blockNumber, o.l2Timestamp, o.l1BlockNumber, o.sameTimestampIndex, txIndex, tx, sender, receipt, transfers, logs, calls,
 		func(addr common.Address) uint8 { return accountKindCached(statedb, o.codeCache, addr) })
 }
 
-// newReceiptMsg — live(BlockObserver)·sweep(SweepObserver) 공용 메시지 조립.
+// NewReceiptMsg — live(BlockObserver)·sweep(SweepObserver) 공용 메시지 조립.
 // transfers/calls는 호출자가 소유권을 넘긴 슬라이스여야 한다 (재사용 버퍼 금지).
-func newReceiptMsg(blockNumber, l2Timestamp, l1BlockNumber uint64, sameTimestampIndex uint32, txIndex int, tx *types.Transaction, sender common.Address, receipt *types.Receipt, transfers []TransferRecord, logs []LogRecord, calls []WhitelistedCallRecord, accountKind func(common.Address) uint8) *ReceiptMsg {
+func NewReceiptMsg(blockNumber, l2Timestamp, l1BlockNumber uint64, sameTimestampIndex uint32, txIndex int, tx *types.Transaction, sender common.Address, receipt *types.Receipt, transfers []TransferRecord, logs []LogRecord, calls []WhitelistedCallRecord, accountKind func(common.Address) uint8) *ReceiptMsg {
 	// PERF:ALLOC
 	//   cost: mem=O(1)·struct + O(N_logs+N_transfers+N_calls) 슬라이스/tx, N~1e0..1e2 → N 불확실
 	//   note: msg는 writer가 비동기 직렬화하므로 tx-scope 버퍼 재사용 불가

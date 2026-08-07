@@ -49,6 +49,11 @@ func init() {
 	add(flapPortal, [4]byte{0x9d, 0x55, 0xbd, 0xe4}) // stageNewTokenV5
 }
 
+// TargetCall — allowlist 매칭 공개 래퍼 (bandpatch 등 재구성 경로용).
+func TargetCall(to common.Address, input []byte) (sel [4]byte, ok bool) {
+	return isTarget(to, input)
+}
+
 func isTarget(to common.Address, input []byte) (sel [4]byte, ok bool) {
 	if len(input) < 4 {
 		return sel, false

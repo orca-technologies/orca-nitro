@@ -93,7 +93,7 @@ func (o *SweepObserver) OnBlockExecuted(block *types.Block, receipts types.Recei
 			logs = cp.logs
 			calls = cp.calls
 		}
-		msg := newReceiptMsg(blockNumber, block.Time(), l1BlockNumber, index, i, tx, sender, receipts[i], transfers, logs, calls,
+		msg := NewReceiptMsg(blockNumber, block.Time(), l1BlockNumber, index, i, tx, sender, receipts[i], transfers, logs, calls,
 			func(addr common.Address) uint8 { return accountKindCached(statedb, codeCache, addr) })
 		o.sink.Enqueue(MsgReceipt, msg)
 		receiptCount++
@@ -108,6 +108,13 @@ func (o *SweepObserver) OnBlockExecuted(block *types.Block, receipts types.Recei
 		ReceiptCount:       receiptCount,
 		L1BlockNumber:      l1BlockNumber,
 	})
+}
+
+// OnBlockSkipped — mismatch로 dispatch를 생략한 블록 (skip-on-mismatch).
+// SameTimestampIndex 연속성만 유지하고 수집분은 폐기한다 — 다음 블록 오염 방지.
+func (o *SweepObserver) OnBlockSkipped(block *types.Block) {
+	o.tracker.Advance(block.NumberU64(), block.Time())
+	clear(o.txCaps)
 }
 
 // OnRangeDone — worker chunk [start, end] 재실행 완료 마커.

@@ -54,6 +54,16 @@ func init() {
 	ptG15 := "0x7A6C474b4DcD35b72203D2B569EAfE4C9b5C768e"
 	ptG1 := "0x00004c4ccc709Ef590F7C81102C0689F0263D4e9"
 	for _, launcher := range []string{ptG2, ptG15, ptG1} {
+		// multicall(bytes[]) is RECORD-ONLY, like the third-party router below:
+		// the sniping decoder (`named_events_from_calls`) matches only the three
+		// launch selectors, so the wrapper record never becomes a NamedEvent.
+		// Nothing is lost — the wrapper delegatecalls back into the launcher and
+		// each inner frame is its own TARGET hit carrying the full launch
+		// metadata. At depth 0 (all observed entries) the wrapper Input also
+		// duplicates ReceiptMsg.Calldata, so the record is pure wire cost there;
+		// what it uniquely captures is the wrapper frame itself when the
+		// launcher is entered by an inner call. If wire volume matters more,
+		// delete this line — no decoder depends on it.
 		add(launcher, [4]byte{0xac, 0x96, 0x50, 0xd8}) // multicall(bytes[])
 		add(launcher, [4]byte{0xb6, 0x98, 0x2b, 0x48}) // distributeToken(address,(address,uint128,bytes),bytes32)
 		add(launcher, [4]byte{0xde, 0xc1, 0x4b, 0xe1}) // createToken(address,string,string,uint8,uint128,address,bytes) — meta is calldata-only
@@ -70,10 +80,14 @@ func init() {
 	// matching is per-frame), so a router launch still yields createToken and
 	// distributeToken records with the same metadata.
 	//
-	// It is kept rather than removed because this router is 26.3% of launches
-	// and its own calldata carries the entry-level salt and metadata blob, which
-	// is the only place to attribute the router itself if that is ever wanted.
-	// If wire volume matters more, delete this line — no decoder depends on it.
+	// It is kept for the one case ReceiptMsg does not cover: the router being
+	// entered by an inner call from another contract — unobserved so far (the
+	// router is 26.3% of launches, all of it top-level). For top-level entries
+	// ReceiptMsg already attributes the router (To is the tx recipient) and
+	// carries its entry-level salt and metadata blob (Calldata is the full
+	// tx.Data(), see newReceiptMsg in observer.go), so there this record only
+	// duplicates them. If wire volume matters more, delete this line — no
+	// decoder depends on it.
 	add("0xa0177CF584E06f4E7876d7bf0b2D5016e0d8a1fa", [4]byte{0x27, 0xa1, 0x09, 0x8d}) // launch(string,string,(string,string,string,uint256),uint256,bytes32)
 	// UniversalRouter 0x8876789976dEcBfCbBbe364623C63652db8C0904 execute() is deliberately
 	// NOT a target here. It is the chain-wide swap router (5.5M txs vs 10k on the launcher),

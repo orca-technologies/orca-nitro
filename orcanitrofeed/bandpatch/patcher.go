@@ -19,12 +19,14 @@ import (
 
 // Patcher — 블록 목록을 외부 데이터로 복원해 기존 FEED consumer에 dispatch한다.
 // Data는 블록·receipts·code·헤더(로컬 archive 권장), Trace는 debug tracer 지원
-// 엔드포인트(Alchemy). 둘이 같은 클라이언트여도 된다.
+// 엔드포인트(Alchemy). 둘이 같은 클라이언트여도 된다. Cache가 켜져 있으면 블록
+// 번들을 내구 저장소에 보관하고 재실행 시 RPC 없이 재사용한다.
 type Patcher struct {
 	Data     *rpc.Client
 	Trace    *rpc.Client
 	Sink     orcanitrofeed.Sink
 	Lookback uint64
+	Cache    *FetchCache
 
 	limiter     *time.Ticker
 	headerTimes map[uint64]uint64
@@ -37,10 +39,12 @@ type PatchStats struct {
 	Receipts     int
 	DegradedTxs  int // post balance 검증 실패로 강등된 tx 수
 	LogFallbacks int // 재구성 로그 수 불일치로 receipt 로그 폴백한 tx 수
+	CacheHits    int
+	CacheMisses  int
 }
 
-// NewPatcher — rps는 RPC 호출 rate 상한 (Data·Trace 합산).
-func NewPatcher(data, trace *rpc.Client, sink orcanitrofeed.Sink, lookback uint64, rps int) *Patcher {
+// NewPatcher — rps는 RPC 호출 rate 상한 (Data·Trace 합산). cache는 nil 허용.
+func NewPatcher(data, trace *rpc.Client, sink orcanitrofeed.Sink, lookback uint64, rps int, cache *FetchCache) *Patcher {
 	if rps <= 0 {
 		rps = 8
 	}
@@ -49,6 +53,7 @@ func NewPatcher(data, trace *rpc.Client, sink orcanitrofeed.Sink, lookback uint6
 		Trace:       trace,
 		Sink:        sink,
 		Lookback:    lookback,
+		Cache:       cache,
 		limiter:     time.NewTicker(time.Second / time.Duration(rps)),
 		headerTimes: make(map[uint64]uint64),
 		stats:       PatchStats{},
@@ -69,14 +74,6 @@ type traceResult struct {
 	TxHash common.Hash     `json:"txHash"`
 	Result json.RawMessage `json:"result"`
 	Error  string          `json:"error"`
-}
-
-// rpcTxEnvelope — full-tx 블록 응답에서 tx 본문과 from을 함께 취한다
-// (ethclient는 from을 버리고 signer 재복원을 요구하므로 raw로 받는다).
-type rpcTxEnvelope struct {
-	raw  json.RawMessage
-	tx   *types.Transaction
-	from common.Address
 }
 
 func (p *Patcher) fetchHeader(ctx context.Context, n uint64) (*types.Header, error) {
@@ -104,53 +101,126 @@ func (p *Patcher) headerTime(ctx context.Context) orcanitrofeed.HeaderTimeFunc {
 	}
 }
 
-func (p *Patcher) fetchTxs(ctx context.Context, n uint64) ([]rpcTxEnvelope, error) {
-	var raw struct {
-		Transactions []json.RawMessage `json:"transactions"`
+// fetchBundle — RPC에서 블록 번들을 조립한다 (캐시 미스 경로).
+func (p *Patcher) fetchBundle(ctx context.Context, n uint64) (*blockBundle, error) {
+	var blockRaw json.RawMessage
+	if err := p.call(ctx, p.Data, &blockRaw, "eth_getBlockByNumber", hexutil.EncodeUint64(n), true); err != nil {
+		return nil, fmt.Errorf("block: %w", err)
 	}
-	if err := p.call(ctx, p.Data, &raw, "eth_getBlockByNumber", hexutil.EncodeUint64(n), true); err != nil {
+	if len(blockRaw) == 0 || string(blockRaw) == "null" {
+		return nil, fmt.Errorf("block %d not found", n)
+	}
+	var receiptsRaw json.RawMessage
+	if err := p.call(ctx, p.Data, &receiptsRaw, "eth_getBlockReceipts", hexutil.EncodeUint64(n)); err != nil {
+		return nil, fmt.Errorf("receipts: %w", err)
+	}
+	var callRaw json.RawMessage
+	if err := p.call(ctx, p.Trace, &callRaw, "debug_traceBlockByNumber", hexutil.EncodeUint64(n),
+		map[string]any{"tracer": "callTracer", "tracerConfig": map[string]any{"withLog": true}}); err != nil {
+		return nil, fmt.Errorf("callTracer: %w", err)
+	}
+	var preRaw json.RawMessage
+	if err := p.call(ctx, p.Trace, &preRaw, "debug_traceBlockByNumber", hexutil.EncodeUint64(n),
+		map[string]any{"tracer": "prestateTracer", "tracerConfig": map[string]any{"diffMode": true}}); err != nil {
+		return nil, fmt.Errorf("prestateTracer: %w", err)
+	}
+
+	head, txs, err := decodeBlock(n, blockRaw)
+	if err != nil {
 		return nil, err
 	}
-	envs := make([]rpcTxEnvelope, 0, len(raw.Transactions))
-	for i, rawTx := range raw.Transactions {
+	p.headerTimes[n] = head.Time
+
+	// AccountKind 선계산 — NewReceiptMsg가 조회하는 집합은 정확히 {sender, to}다.
+	// 번들에 담아두면 재사용 시 eth_getCode가 필요 없다.
+	kinds := make(map[string]uint8)
+	blockArg := hexutil.EncodeUint64(n)
+	resolve := func(addr common.Address) error {
+		key := addr.Hex()
+		if _, ok := kinds[key]; ok {
+			return nil
+		}
+		var code hexutil.Bytes
+		if err := p.call(ctx, p.Data, &code, "eth_getCode", addr, blockArg); err != nil {
+			return fmt.Errorf("eth_getCode %s: %w", addr, err)
+		}
+		kinds[key] = classifyCode(code)
+		return nil
+	}
+	for _, env := range txs {
+		if env.tx.Type() == types.ArbitrumInternalTxType {
+			continue
+		}
+		if err := resolve(env.from); err != nil {
+			return nil, err
+		}
+		if to := env.tx.To(); to != nil {
+			if err := resolve(*to); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	sameTs := orcanitrofeed.WalkSameTimestampIndex(n, head.Time, p.Lookback, p.headerTime(ctx))
+	return &blockBundle{
+		Schema:             bundleSchema,
+		Block:              n,
+		BlockJSON:          blockRaw,
+		ReceiptsJSON:       receiptsRaw,
+		CallTracesJSON:     callRaw,
+		PrestatesJSON:      preRaw,
+		AccountKinds:       kinds,
+		SameTimestampIndex: sameTs,
+	}, nil
+}
+
+func classifyCode(code []byte) uint8 {
+	switch {
+	case len(code) == 0:
+		return orcanitrofeed.AccountKindEmpty
+	case len(code) == 23:
+		if _, ok := types.ParseDelegation(code); ok {
+			return orcanitrofeed.AccountKindEip7702
+		}
+		return orcanitrofeed.AccountKindContract
+	default:
+		return orcanitrofeed.AccountKindContract
+	}
+}
+
+// rpcTxEnvelope — full-tx 블록 응답에서 tx 본문과 from을 함께 취한다
+// (ethclient는 from을 버리고 signer 재복원을 요구하므로 raw로 받는다).
+type rpcTxEnvelope struct {
+	tx   *types.Transaction
+	from common.Address
+}
+
+func decodeBlock(n uint64, blockRaw json.RawMessage) (*types.Header, []rpcTxEnvelope, error) {
+	var head types.Header
+	if err := json.Unmarshal(blockRaw, &head); err != nil {
+		return nil, nil, fmt.Errorf("block %d header decode: %w", n, err)
+	}
+	var body struct {
+		Transactions []json.RawMessage `json:"transactions"`
+	}
+	if err := json.Unmarshal(blockRaw, &body); err != nil {
+		return nil, nil, fmt.Errorf("block %d txs decode: %w", n, err)
+	}
+	envs := make([]rpcTxEnvelope, 0, len(body.Transactions))
+	for i, rawTx := range body.Transactions {
 		tx := new(types.Transaction)
 		if err := tx.UnmarshalJSON(rawTx); err != nil {
-			return nil, fmt.Errorf("block %d tx %d decode: %w", n, i, err)
+			return nil, nil, fmt.Errorf("block %d tx %d decode: %w", n, i, err)
 		}
 		var meta struct {
 			From common.Address `json:"from"`
 		}
 		if err := json.Unmarshal(rawTx, &meta); err != nil {
-			return nil, fmt.Errorf("block %d tx %d from: %w", n, i, err)
+			return nil, nil, fmt.Errorf("block %d tx %d from: %w", n, i, err)
 		}
-		envs = append(envs, rpcTxEnvelope{raw: rawTx, tx: tx, from: meta.From})
+		envs = append(envs, rpcTxEnvelope{tx: tx, from: meta.From})
 	}
-	return envs, nil
-}
-
-// accountKindFor — eth_getCode 기반 AccountKind (블록별 캐시).
-func (p *Patcher) accountKindFor(ctx context.Context, n uint64, cache map[common.Address]uint8) func(common.Address) uint8 {
-	blockArg := hexutil.EncodeUint64(n)
-	return func(addr common.Address) uint8 {
-		if v, ok := cache[addr]; ok {
-			return v
-		}
-		var code hexutil.Bytes
-		kind := orcanitrofeed.AccountKindEmpty
-		if err := p.call(ctx, p.Data, &code, "eth_getCode", addr, blockArg); err != nil {
-			log.Warn("bandpatch: eth_getCode failed, assuming empty", "addr", addr, "block", n, "err", err)
-		} else if len(code) == 23 {
-			if _, ok := types.ParseDelegation(code); ok {
-				kind = orcanitrofeed.AccountKindEip7702
-			} else {
-				kind = orcanitrofeed.AccountKindContract
-			}
-		} else if len(code) > 0 {
-			kind = orcanitrofeed.AccountKindContract
-		}
-		cache[addr] = kind
-		return kind
-	}
+	return &head, envs, nil
 }
 
 // PatchBlocks — 정렬·중복 제거 후 블록별 복원·dispatch. 연속 구간마다 RangeDone.
@@ -177,25 +247,49 @@ func (p *Patcher) PatchBlocks(ctx context.Context, nums []uint64) (PatchStats, e
 		prev = n
 		p.stats.Blocks++
 		if (i+1)%100 == 0 {
-			log.Info("bandpatch progress", "done", i+1, "total", len(nums), "receipts", p.stats.Receipts)
+			log.Info("bandpatch progress", "done", i+1, "total", len(nums),
+				"receipts", p.stats.Receipts, "cacheHits", p.stats.CacheHits)
 		}
 	}
 	flushRange()
 	return p.stats, nil
 }
 
+func (p *Patcher) loadOrFetchBundle(ctx context.Context, n uint64) (*blockBundle, error) {
+	bundle, err := p.Cache.Load(n)
+	if err != nil {
+		log.Warn("bandpatch: cache load failed, refetching", "block", n, "err", err)
+	}
+	if bundle != nil {
+		p.stats.CacheHits++
+		return bundle, nil
+	}
+	if p.Cache != nil && p.Cache.Only {
+		return nil, fmt.Errorf("cache-only but block %d not cached", n)
+	}
+	p.stats.CacheMisses++
+	bundle, err = p.fetchBundle(ctx, n)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.Cache.Store(bundle); err != nil {
+		return nil, fmt.Errorf("cache store: %w", err)
+	}
+	return bundle, nil
+}
+
 func (p *Patcher) patchBlock(ctx context.Context, n uint64) error {
-	head, err := p.fetchHeader(ctx, n)
+	bundle, err := p.loadOrFetchBundle(ctx, n)
 	if err != nil {
 		return err
 	}
-	txs, err := p.fetchTxs(ctx, n)
+	head, txs, err := decodeBlock(n, bundle.BlockJSON)
 	if err != nil {
 		return err
 	}
 	var receipts types.Receipts
-	if err := p.call(ctx, p.Data, &receipts, "eth_getBlockReceipts", hexutil.EncodeUint64(n)); err != nil {
-		return fmt.Errorf("receipts: %w", err)
+	if err := json.Unmarshal(bundle.ReceiptsJSON, &receipts); err != nil {
+		return fmt.Errorf("receipts decode: %w", err)
 	}
 	if len(receipts) != len(txs) {
 		return fmt.Errorf("receipts/txs count mismatch: %d vs %d", len(receipts), len(txs))
@@ -205,34 +299,35 @@ func (p *Patcher) patchBlock(ctx context.Context, n uint64) error {
 		log.Warn("bandpatch: fetched receipts do not re-derive header receiptsRoot (json round-trip loss?)",
 			"block", n, "got", got, "want", head.ReceiptHash)
 	}
-	var traces []traceResult
-	if err := p.call(ctx, p.Trace, &traces, "debug_traceBlockByNumber", hexutil.EncodeUint64(n),
-		map[string]any{"tracer": "callTracer", "tracerConfig": map[string]any{"withLog": true}}); err != nil {
-		return fmt.Errorf("callTracer: %w", err)
+	var traces, prestates []traceResult
+	if err := json.Unmarshal(bundle.CallTracesJSON, &traces); err != nil {
+		return fmt.Errorf("callTracer decode: %w", err)
 	}
-	var prestates []traceResult
-	if err := p.call(ctx, p.Trace, &prestates, "debug_traceBlockByNumber", hexutil.EncodeUint64(n),
-		map[string]any{"tracer": "prestateTracer", "tracerConfig": map[string]any{"diffMode": true}}); err != nil {
-		return fmt.Errorf("prestateTracer: %w", err)
+	if err := json.Unmarshal(bundle.PrestatesJSON, &prestates); err != nil {
+		return fmt.Errorf("prestateTracer decode: %w", err)
 	}
 	if len(traces) != len(txs) || len(prestates) != len(txs) {
 		return fmt.Errorf("trace count mismatch: call=%d prestate=%d txs=%d", len(traces), len(prestates), len(txs))
 	}
 
 	extra := types.DeserializeHeaderExtraInformation(head)
-	sameTsIdx := orcanitrofeed.WalkSameTimestampIndex(n, head.Time, p.Lookback, p.headerTime(ctx))
-	kindCache := make(map[common.Address]uint8)
-	accountKind := p.accountKindFor(ctx, n, kindCache)
+	accountKind := func(addr common.Address) uint8 {
+		if k, ok := bundle.AccountKinds[addr.Hex()]; ok {
+			return k
+		}
+		log.Warn("bandpatch: account kind missing from bundle, assuming empty", "block", n, "addr", addr)
+		return orcanitrofeed.AccountKindEmpty
+	}
 
 	var receiptCount uint32
 	for i, env := range txs {
 		if env.tx.Type() == types.ArbitrumInternalTxType {
 			continue
 		}
-		var frame CallFrame
 		if traces[i].Error != "" {
 			return fmt.Errorf("tx %d trace error: %s", i, traces[i].Error)
 		}
+		var frame CallFrame
 		if err := json.Unmarshal(traces[i].Result, &frame); err != nil {
 			return fmt.Errorf("tx %d callTracer decode: %w", i, err)
 		}
@@ -250,7 +345,7 @@ func (p *Patcher) patchBlock(ctx context.Context, n uint64) error {
 		if len(logs) != len(receipts[i].Logs) {
 			p.stats.LogFallbacks++
 		}
-		msg := orcanitrofeed.NewReceiptMsg(n, head.Time, extra.L1BlockNumber, sameTsIdx, i,
+		msg := orcanitrofeed.NewReceiptMsg(n, head.Time, extra.L1BlockNumber, bundle.SameTimestampIndex, i,
 			env.tx, env.from, receipts[i], transfers, logs, calls, accountKind)
 		p.Sink.Enqueue(orcanitrofeed.MsgReceipt, msg)
 		receiptCount++
@@ -261,7 +356,7 @@ func (p *Patcher) patchBlock(ctx context.Context, n uint64) error {
 		Seq:                0,
 		BlockNumber:        n,
 		TxCount:            uint32(len(txs)),
-		SameTimestampIndex: sameTsIdx,
+		SameTimestampIndex: bundle.SameTimestampIndex,
 		ReceiptCount:       receiptCount,
 		L1BlockNumber:      extra.L1BlockNumber,
 	})

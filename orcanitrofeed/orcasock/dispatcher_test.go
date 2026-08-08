@@ -101,6 +101,74 @@ func TestDispatcherHelloAndRoundtrip(t *testing.T) {
 	}
 }
 
+// sweep(noDrop) 모드: 아주 작은 staging·retention 예산 + 뒤늦게 붙는 느린 소비자.
+// live 모드였다면 age(1ms)·budget으로 대부분 유실됐을 조건에서 전량·순서 보장을 검증한다.
+func TestDispatcherSweepModeLossless(t *testing.T) {
+	sock := filepath.Join(mustTempDir(t), "orca.sock")
+	cfg := orcanitrofeed.DefaultConfig
+	cfg.Enable = true
+	cfg.SocketPath = sock
+	cfg.BufferSize = 8
+	cfg.BufferBytes = 4096
+	cfg.BufferAge = time.Millisecond
+	d, err := NewDispatcher(&cfg, orcanitrofeed.ModeSweep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+
+	const total = 5000
+	enqDone := make(chan struct{})
+	go func() {
+		for i := 0; i < total; i++ {
+			d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.ReceiptMsg{BlockNumber: uint64(i)})
+		}
+		close(enqDone)
+	}()
+
+	// 소비자 없음 → 역압으로 생산자가 멈춰 있어야 한다 (유실 대신)
+	select {
+	case <-enqDone:
+		t.Fatal("소비자 없이 전량 enqueue됨 — 역압 미작동 (유실 의심)")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if typ, _ := readFrame(t, conn); typ != orcanitrofeed.MsgHello {
+		t.Fatal("hello 아님")
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for i := 0; i < total; i++ {
+		if time.Now().After(deadline) {
+			t.Fatalf("수신 정체: %d/%d", i, total)
+		}
+		typ, payload := readFrame(t, conn)
+		if typ != orcanitrofeed.MsgReceipt {
+			t.Fatalf("receipt 아님: %d", typ)
+		}
+		var got orcanitrofeed.ReceiptMsg
+		if _, err := got.UnmarshalMsg(payload); err != nil {
+			t.Fatal(err)
+		}
+		// 전량 + 순서 + seq 연속 (드랍 없음)
+		if got.BlockNumber != uint64(i) || got.Seq != uint64(i) {
+			t.Fatalf("유실/순서 붕괴: i=%d block=%d seq=%d", i, got.BlockNumber, got.Seq)
+		}
+		if i%500 == 0 {
+			time.Sleep(time.Millisecond) // 느린 소비자 흉내 — 역압 구간 유지
+		}
+	}
+	select {
+	case <-enqDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("생산자가 끝나지 않음")
+	}
+}
+
 func TestDispatcherEnqueueWithoutClientDoesNotBlock(t *testing.T) {
 	d, _ := newTestDispatcher(t, 8)
 	done := make(chan struct{})

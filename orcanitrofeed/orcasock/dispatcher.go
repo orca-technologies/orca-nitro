@@ -17,7 +17,10 @@ const (
 	frameHeaderSize  = 5 // u32 LE payload len + u8 MsgType
 	connWriteTimeout = 5 * time.Second
 	closeFlushCap    = 5 * time.Second
-	dropLogThrottle  = time.Second
+	// sweep(무손실) 모드 flush 상한 — 잔여 backlog(≤ buffer-bytes)를 로컬 소켓으로
+	// 밀어내는 시간이면 충분히 크다.
+	closeFlushCapNoDrop = 10 * time.Minute
+	dropLogThrottle     = time.Second
 )
 
 type queuedMsg struct {
@@ -72,11 +75,14 @@ type retainedFrame struct {
 //	cost: mem=O(min(budget, throughput×age)), budget 기본 1GiB / age 기본 30m
 //	note: 컨슈머 backlog 보관 — drop-oldest로 상한 고정
 type frameLog struct {
-	frames  []retainedFrame
-	start   uint64 // frames[0]의 전역 인덱스
-	bytes   int
-	budget  int
-	maxAge  time.Duration // 0 = age 제한 없음
+	frames []retainedFrame
+	start  uint64 // frames[0]의 전역 인덱스
+	bytes  int
+	budget int
+	maxAge time.Duration // 0 = age 제한 없음
+	// noDrop(sweep): age·budget 기반 drop 금지 — trim은 소비-trim(trimConsumed)만.
+	// budget은 writeLoop의 역압 임계로만 쓰인다.
+	noDrop  bool
 	dropped uint64
 }
 
@@ -85,18 +91,24 @@ func (l *frameLog) end() uint64 {
 	return l.start + uint64(len(l.frames))
 }
 
-func (l *frameLog) dropOldest() {
+// popFront — 맨 앞 프레임 제거 (유실 카운트 없음 — 소비 완료 trim용).
+func (l *frameLog) popFront() {
 	l.bytes -= len(l.frames[0].data)
 	l.frames[0] = retainedFrame{}
 	l.frames = l.frames[1:]
 	l.start++
+}
+
+func (l *frameLog) dropOldest() {
+	l.popFront()
 	l.dropped++
 }
 
 // trim — 바이트 예산·age 초과분 drop. age는 마지막 프레임까지 비울 수 있고,
 // 바이트 예산은 최소 1프레임은 남긴다 (단일 거대 프레임 허용).
+// noDrop 모드에서는 유실성 trim을 하지 않는다 (compaction만).
 func (l *frameLog) trim(now time.Time) {
-	for len(l.frames) > 0 {
+	for len(l.frames) > 0 && !l.noDrop {
 		if l.maxAge > 0 && now.Sub(l.frames[0].at) > l.maxAge {
 			l.dropOldest()
 			continue
@@ -122,15 +134,24 @@ func (l *frameLog) push(f []byte, now time.Time) {
 // 실행 핫패스는 Enqueue(mutex push)만 수행하고, 인코딩·보관·소켓 write는
 // writer/sender goroutine이 전담한다. 연결마다 sender가 log 커서를 따라가며
 // 백로그 replay 후 live로 이어붙는다.
+//
+// 모드별 정책:
+//   - live: 완전 비블로킹 — staging·retention 모두 drop-oldest (지연 < 완전성).
+//   - sweep(noDrop): 무손실 — 모든 연결이 소비한 프레임만 trim하고, 예산 초과 시
+//     writer→Enqueue로 역압이 걸려 재실행 자체가 스로틀된다. 컨슈머가 없으면
+//     예산까지 보관 후 정지한다 (컨슈머 접속 시 재개).
 type Dispatcher struct {
 	mode       string
+	noDrop     bool
 	socketPath string
 
 	mu          sync.Mutex
 	stagingCond *sync.Cond // staging에 새 메시지 or closed
 	logCond     *sync.Cond // retention log append or closed
+	flowCond    *sync.Cond // noDrop: staging pop·cursor 전진 (역압 해제 신호)
 	staging     *msgRing
 	retained    *frameLog
+	cursors     map[net.Conn]uint64 // sender별 전송 커서 (noDrop trim 기준)
 	nextSeq     uint64
 	closed      bool
 	lastDropLog time.Time
@@ -141,6 +162,33 @@ type Dispatcher struct {
 	listener net.Listener
 	wg       sync.WaitGroup // accept + writer
 	connWg   sync.WaitGroup // per-conn sender
+}
+
+// minCursor — 모든 활성 sender가 이미 보낸 프레임의 하한. 연결이 없으면 (0,false).
+// 호출자는 d.mu를 잡고 있어야 한다.
+func (d *Dispatcher) minCursor() (uint64, bool) {
+	if len(d.cursors) == 0 {
+		return 0, false
+	}
+	min := ^uint64(0)
+	for _, c := range d.cursors {
+		if c < min {
+			min = c
+		}
+	}
+	return min, true
+}
+
+// trimConsumed — noDrop: 모든 연결이 소비한 프레임만 버린다. 연결이 없으면 보존.
+// 호출자는 d.mu를 잡고 있어야 한다.
+func (d *Dispatcher) trimConsumed() {
+	min, ok := d.minCursor()
+	if !ok {
+		return
+	}
+	for len(d.retained.frames) > 0 && d.retained.start < min {
+		d.retained.popFront()
+	}
 }
 
 func NewDispatcher(cfg *orcanitrofeed.Config, mode string) (*Dispatcher, error) {
@@ -163,18 +211,22 @@ func NewDispatcher(cfg *orcanitrofeed.Config, mode string) (*Dispatcher, error) 
 		return nil, err
 	}
 	d := &Dispatcher{
-		mode:        mode,
-		socketPath:  cfg.SocketPath,
-		staging:     newMsgRing(cfg.BufferSize),
+		mode:       mode,
+		noDrop:     mode == orcanitrofeed.ModeSweep,
+		socketPath: cfg.SocketPath,
+		staging:    newMsgRing(cfg.BufferSize),
 		retained: &frameLog{
 			frames: nil, start: 0, bytes: 0,
-			budget: cfg.BufferBytes, maxAge: cfg.BufferAge, dropped: 0,
+			budget: cfg.BufferBytes, maxAge: cfg.BufferAge,
+			noDrop: mode == orcanitrofeed.ModeSweep, dropped: 0,
 		},
+		cursors:     make(map[net.Conn]uint64),
 		conns:       make(map[net.Conn]struct{}),
 		listener:    listener,
 		mu:          sync.Mutex{},
 		stagingCond: nil,
 		logCond:     nil,
+		flowCond:    nil,
 		nextSeq:     0,
 		closed:      false,
 		lastDropLog: time.Time{},
@@ -184,19 +236,27 @@ func NewDispatcher(cfg *orcanitrofeed.Config, mode string) (*Dispatcher, error) 
 	}
 	d.stagingCond = sync.NewCond(&d.mu)
 	d.logCond = sync.NewCond(&d.mu)
+	d.flowCond = sync.NewCond(&d.mu)
 	d.wg.Add(2)
 	go d.acceptLoop()
 	go d.writeLoop()
 	return d, nil
 }
 
-// Enqueue는 seq를 부여해 staging에 넣는다. 논블로킹 — 가득 차면 oldest drop.
+// Enqueue는 seq를 부여해 staging에 넣는다.
+// live: 논블로킹 — 가득 차면 oldest drop. sweep(noDrop): 가득 차면 블로킹 —
+// writer→컨슈머 체인의 역압이 재실행을 스로틀한다 (유실 없음).
 // msg는 enqueue 이후 수정하면 안 된다 (writer가 비동기로 직렬화).
 func (d *Dispatcher) Enqueue(typ orcanitrofeed.MsgType, msg orcanitrofeed.SeqSetter) {
 	// PERF:LOCK
-	//   cost: hold~ns (push + signal)
-	//   note: 실행 핫패스 유일한 동기화 지점
+	//   cost: hold~ns (push + signal); noDrop 포화 시 flowCond 대기
+	//   note: 실행 핫패스 유일한 동기화 지점 — sweep 역압 지점이기도 하다
 	d.mu.Lock()
+	if d.noDrop {
+		for d.staging.size == len(d.staging.buf) && !d.closed {
+			d.flowCond.Wait()
+		}
+	}
 	if d.closed {
 		d.mu.Unlock()
 		return
@@ -241,6 +301,7 @@ func (d *Dispatcher) acceptLoop() {
 }
 
 // writeLoop — staging에서 꺼내 인코딩하고 retention log에 보관한다.
+// noDrop: 예산 초과 시 push 전에 소비-trim이 자리를 낼 때까지 대기 (역압 전파).
 func (d *Dispatcher) writeLoop() {
 	defer d.wg.Done()
 	for {
@@ -249,6 +310,9 @@ func (d *Dispatcher) writeLoop() {
 			d.stagingCond.Wait()
 		}
 		m, ok := d.staging.pop()
+		if ok && d.noDrop {
+			d.flowCond.Broadcast() // staging에 자리 → Enqueue 재개
+		}
 		if !ok && d.closed {
 			d.mu.Unlock()
 			d.logCond.Broadcast()
@@ -263,6 +327,13 @@ func (d *Dispatcher) writeLoop() {
 		//   note: 프레임 버퍼는 frameLog가 소유 (drop-oldest로 수명 관리)
 		frame := encodeFrame(m.typ, m.msg)
 		d.mu.Lock()
+		if d.noDrop {
+			d.trimConsumed()
+			for d.retained.bytes > d.retained.budget && !d.closed {
+				d.flowCond.Wait() // sender 전진(trimConsumed)이 예산을 비울 때까지
+				d.trimConsumed()
+			}
+		}
 		d.retained.push(frame, time.Now())
 		d.mu.Unlock()
 		d.logCond.Broadcast()
@@ -270,7 +341,8 @@ func (d *Dispatcher) writeLoop() {
 }
 
 // sendLoop — 연결별 sender. retention log 커서를 따라가며 backlog replay 후
-// live tail. 예산·age 초과로 밀린 구간은 건너뛴다 (클라이언트는 seq gap으로 감지).
+// live tail. live: 예산·age 초과로 밀린 구간은 건너뛴다 (클라이언트는 seq gap으로
+// 감지). noDrop: 커서를 cursors에 등록해 소비-trim·역압의 기준이 된다.
 func (d *Dispatcher) sendLoop(conn net.Conn) {
 	defer d.connWg.Done()
 	defer func() {
@@ -278,11 +350,16 @@ func (d *Dispatcher) sendLoop(conn net.Conn) {
 		d.connMu.Lock()
 		delete(d.conns, conn)
 		d.connMu.Unlock()
+		d.mu.Lock()
+		delete(d.cursors, conn)
+		d.mu.Unlock()
+		d.flowCond.Broadcast() // 죽은 연결이 min cursor를 붙잡지 않도록
 	}()
 
 	d.mu.Lock()
 	d.retained.trim(time.Now())
 	cursor := d.retained.start // 보관 중인 가장 오래된 것부터 replay
+	d.cursors[conn] = cursor
 	d.mu.Unlock()
 
 	batch := make([][]byte, 0, 256)
@@ -298,7 +375,7 @@ func (d *Dispatcher) sendLoop(conn net.Conn) {
 			return
 		}
 		if cursor < d.retained.start {
-			cursor = d.retained.start // 예산·age 초과로 밀림 — gap
+			cursor = d.retained.start // 예산·age 초과로 밀림 — gap (live 전용)
 		}
 		batch = batch[:0]
 		for _, rf := range d.retained.frames[cursor-d.retained.start:] {
@@ -316,6 +393,13 @@ func (d *Dispatcher) sendLoop(conn net.Conn) {
 				return
 			}
 		}
+		d.mu.Lock()
+		d.cursors[conn] = cursor
+		if d.noDrop {
+			d.trimConsumed()
+		}
+		d.mu.Unlock()
+		d.flowCond.Broadcast() // 커서 전진 → writeLoop 역압 해제 기회
 	}
 }
 
@@ -335,23 +419,58 @@ func encodeFrame(typ orcanitrofeed.MsgType, msg msgp.Marshaler) []byte {
 }
 
 // Close는 staging 잔량의 인코딩·보관과 연결된 클라이언트의 catch-up을
-// closeFlushCap까지 기다린 뒤 정리한다.
+// 기다린 뒤 정리한다. noDrop(sweep)은 완전 전달까지 대기(cap 10m) —
+// 미전달 잔량이 남으면 유실로 간주하고 크게 로깅한다.
 func (d *Dispatcher) Close() {
+	flushCap := closeFlushCap
+	if d.noDrop {
+		flushCap = closeFlushCapNoDrop
+	}
 	d.mu.Lock()
 	if d.closed {
 		d.mu.Unlock()
 		return
 	}
-	deadline := time.Now().Add(closeFlushCap)
-	for d.staging.size > 0 && time.Now().Before(deadline) {
+	deadline := time.Now().Add(flushCap)
+	flushed := func() bool {
+		if d.staging.size > 0 {
+			return false
+		}
+		if !d.noDrop {
+			return true
+		}
+		min, ok := d.minCursor()
+		// 컨슈머가 하나도 없으면 전달 완료를 기다릴 수 없다 — deadline까지 대기
+		return ok && min >= d.retained.end()
+	}
+	for !flushed() && time.Now().Before(deadline) {
 		d.mu.Unlock()
 		time.Sleep(10 * time.Millisecond)
 		d.mu.Lock()
 	}
+	stagingLeft := d.staging.size
+	stagingDropped := d.staging.dropped
+	retainedDropped := d.retained.dropped
+	var undelivered uint64
+	if min, ok := d.minCursor(); ok && d.retained.end() > min {
+		undelivered = d.retained.end() - min
+	} else if !ok {
+		// #nosec G115
+		undelivered = uint64(len(d.retained.frames))
+	}
 	d.closed = true
 	d.mu.Unlock()
+	if d.noDrop && (stagingLeft > 0 || stagingDropped > 0 || retainedDropped > 0 || undelivered > 0) {
+		log.Error("orca-nitro-feed: sweep dispatcher closing with LOSS — feed is incomplete",
+			"stagingLeft", stagingLeft, "stagingDropped", stagingDropped,
+			"retainedDropped", retainedDropped, "undelivered", undelivered)
+	} else if stagingDropped > 0 || retainedDropped > 0 {
+		log.Warn("orca-nitro-feed: dispatcher dropped frames during run",
+			"stagingDropped", stagingDropped, "retainedDropped", retainedDropped)
+	}
 	d.stagingCond.Broadcast()
 	d.logCond.Broadcast()
+	d.flowCond.Broadcast()
 	d.listener.Close()
 	d.wg.Wait()
 

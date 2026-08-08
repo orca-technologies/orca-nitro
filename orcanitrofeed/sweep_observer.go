@@ -107,6 +107,7 @@ func (o *SweepObserver) OnBlockExecuted(block *types.Block, receipts types.Recei
 		SameTimestampIndex: index,
 		ReceiptCount:       receiptCount,
 		L1BlockNumber:      l1BlockNumber,
+		L2Timestamp:        block.Time(),
 	})
 }
 

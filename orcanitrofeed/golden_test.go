@@ -47,7 +47,7 @@ func goldenMessages() map[string]msgp.Marshaler {
 		"blockseal": &BlockSealMsg{
 			Seq: 8, BlockNumber: 123456, TxCount: 3,
 			SameTimestampIndex: 2, ReceiptCount: 2,
-			L1BlockNumber: 25_000_000,
+			L1BlockNumber: 25_000_000, L2Timestamp: 1_786_000_000,
 		},
 		"invalidation": &InvalidationMsg{Seq: 9, BlockNumber: 123456},
 		"rangedone":    &RangeDoneMsg{Seq: 10, StartBlock: 100, EndBlock: 200},

@@ -52,6 +52,9 @@ func run() error {
 		lookback       = flag.Uint64("same-timestamp-lookback", orcanitrofeed.DefaultSameTimestampLookback, "SameTimestampIndex header walk limit")
 		rps            = flag.Int("rps", 8, "max RPC requests per second (data+trace combined)")
 		dryRun         = flag.Bool("dry-run", false, "fetch and reconstruct only; count messages instead of dispatching")
+		cacheDir       = flag.String("cache-dir", "", "durable per-block bundle cache; reuse across sweeps without re-fetching (recommended: /data2/rhc/cache/band-patch)")
+		cacheOnly      = flag.Bool("cache-only", false, "never hit RPC; fail on cache miss (guards against accidental Alchemy spend)")
+		refetch        = flag.Bool("refetch", false, "ignore cached bundles and refresh them from RPC")
 	)
 	flag.Parse()
 	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, log.LevelInfo, false)))
@@ -107,11 +110,20 @@ func run() error {
 		sink = dispatcher
 	}
 
-	log.Info("orca-band-patch starting", "blocks", len(blocks), "first", blocks[0], "last", blocks[len(blocks)-1], "rps", *rps, "dryRun", *dryRun)
-	patcher := bandpatch.NewPatcher(dataClient, traceClient, sink, *lookback, *rps)
+	var cache *bandpatch.FetchCache
+	if *cacheDir != "" {
+		cache = &bandpatch.FetchCache{Dir: *cacheDir, Refetch: *refetch, Only: *cacheOnly}
+	} else {
+		log.Warn("fetch cache disabled (--cache-dir empty) — Alchemy responses will not be reusable across sweeps")
+	}
+
+	log.Info("orca-band-patch starting", "blocks", len(blocks), "first", blocks[0], "last", blocks[len(blocks)-1],
+		"rps", *rps, "dryRun", *dryRun, "cacheDir", *cacheDir)
+	patcher := bandpatch.NewPatcher(dataClient, traceClient, sink, *lookback, *rps, cache)
 	stats, err := patcher.PatchBlocks(ctx, blocks)
 	log.Info("orca-band-patch done", "blocks", stats.Blocks, "receipts", stats.Receipts,
-		"degradedTxs", stats.DegradedTxs, "logFallbacks", stats.LogFallbacks, "err", err)
+		"degradedTxs", stats.DegradedTxs, "logFallbacks", stats.LogFallbacks,
+		"cacheHits", stats.CacheHits, "cacheMisses", stats.CacheMisses, "err", err)
 	if cs, ok := sink.(*countingSink); ok {
 		log.Info("dry-run message counts", "receipt", cs.receipts, "blockSeal", cs.seals, "rangeDone", cs.ranges)
 	}

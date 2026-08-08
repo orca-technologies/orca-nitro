@@ -359,6 +359,7 @@ func (p *Patcher) patchBlock(ctx context.Context, n uint64) error {
 		SameTimestampIndex: bundle.SameTimestampIndex,
 		ReceiptCount:       receiptCount,
 		L1BlockNumber:      extra.L1BlockNumber,
+		L2Timestamp:        head.Time,
 	})
 	return nil
 }

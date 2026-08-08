@@ -128,6 +128,9 @@ type BlockSealMsg struct {
 	ReceiptCount uint32
 	// 이 L2 블록이 시퀀싱된 L1 block number (ReceiptMsg와 동일 소스).
 	L1BlockNumber uint64
+	// L2 header unix sec — seal 자체가 시각을 나른다. receipt가 없는 블록
+	// (internal tx만)도 올바른 시간 버킷에 들어가야 한다.
+	L2Timestamp uint64
 }
 
 //msgp:tuple InvalidationMsg

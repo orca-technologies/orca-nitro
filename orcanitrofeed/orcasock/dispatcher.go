@@ -16,7 +16,12 @@ import (
 const (
 	frameHeaderSize  = 5 // u32 LE payload len + u8 MsgType
 	connWriteTimeout = 5 * time.Second
-	closeFlushCap    = 5 * time.Second
+	// sweep(무손실) 모드 write deadline — 컨슈머의 순간 정체(시간 버킷 롤오버 등
+	// 수십 개 writer 마감)가 5s를 넘어도 끊지 않는다. 느린 소비자는 역압으로
+	// 스로틀하는 것이지 드랍 대상이 아니다 (2026-08-08 실측: 롤오버 정체 →
+	// i/o timeout 드랍 → 컨슈머 EOF 종료).
+	connWriteTimeoutNoDrop = 10 * time.Minute
+	closeFlushCap          = 5 * time.Second
 	// sweep(무손실) 모드 flush 상한 — 잔여 backlog(≤ buffer-bytes)를 로컬 소켓으로
 	// 밀어내는 시간이면 충분히 크다.
 	closeFlushCapNoDrop = 10 * time.Minute
@@ -362,6 +367,10 @@ func (d *Dispatcher) sendLoop(conn net.Conn) {
 	d.cursors[conn] = cursor
 	d.mu.Unlock()
 
+	writeTimeout := connWriteTimeout
+	if d.noDrop {
+		writeTimeout = connWriteTimeoutNoDrop
+	}
 	batch := make([][]byte, 0, 256)
 	for {
 		d.mu.Lock()
@@ -386,7 +395,7 @@ func (d *Dispatcher) sendLoop(conn net.Conn) {
 		d.mu.Unlock()
 
 		for _, f := range batch {
-			_ = conn.SetWriteDeadline(time.Now().Add(connWriteTimeout))
+			_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 			if _, err := conn.Write(f); err != nil {
 				// 로컬 클라이언트 전제 — 죽었거나 심하게 느린 연결은 정리 (재접속 시 replay)
 				log.Warn("orca-nitro-feed: dropping slow/dead client", "err", err)

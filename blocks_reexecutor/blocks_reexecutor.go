@@ -449,6 +449,7 @@ func (s *BlocksReExecutor) launchHistoricChunk(ctx context.Context, lo, hi uint6
 		defer cancel()
 		prefetched := s.prefetchBlocks(prefetchCtx, lo+1, hi)
 		var statedb *state.StateDB
+		var skippedBlocks []uint64
 		for n := lo + 1; n <= hi; n++ {
 			if ctx.Err() != nil {
 				return
@@ -464,31 +465,50 @@ func (s *BlocksReExecutor) launchHistoricChunk(ctx context.Context, lo, hi uint6
 				s.reportFatalErr(fmt.Errorf("blocksReExecutor historic prefetch failed: %w", pf.err))
 				return
 			}
-			next, err := s.reExecuteHistoricBlock(pf.block, statedb, orcaObserver)
+			next, skipped, err := s.reExecuteHistoricBlock(pf.block, statedb, orcaObserver)
 			if err != nil {
 				if ctx.Err() == nil {
 					s.reportFatalErr(fmt.Errorf("blocksReExecutor historic reexecution failed at block %d: %w", n, err))
 				}
 				return
 			}
+			if skipped {
+				skippedBlocks = append(skippedBlocks, n)
+			}
 			statedb = next
 		}
-		log.Info("Successfully reexecuted historic blocks", "startBlock", lo+1, "endBlock", hi)
+		log.Info("Successfully reexecuted historic blocks", "startBlock", lo+1, "endBlock", hi, "skipped", len(skippedBlocks))
 		if orcaObserver != nil {
-			orcaObserver.OnRangeDone(lo+1, hi)
+			emitRangeDoneExcluding(orcaObserver, lo+1, hi, skippedBlocks)
 		}
 	})
 }
 
+// emitRangeDoneExcluding — skip된 블록을 제외한 연속 구간별 RangeDone.
+// RangeDone은 "구간의 모든 블록이 dispatch됐다"는 완료 신호여야 한다 —
+// skip 블록을 포함하면 progress·regen이 결손을 완료로 오인한다.
+func emitRangeDoneExcluding(o *orcanitrofeed.SweepObserver, lo, hi uint64, skipped []uint64) {
+	start := lo
+	for _, b := range skipped { // 실행 순서상 오름차순
+		if b > start {
+			o.OnRangeDone(start, b-1)
+		}
+		start = b + 1
+	}
+	if start <= hi {
+		o.OnRangeDone(start, hi)
+	}
+}
+
 // reExecuteHistoricBlock — 블록 하나를 재실행하고 receipts root·gas 정합을 검증한다.
 // statedb가 nil이 아니면 (직전 블록의 post-state) 재사용하고, nil이면 부모 root에서 연다.
-// 반환값은 다음 블록에 물려줄 post-state.
-func (s *BlocksReExecutor) reExecuteHistoricBlock(block *types.Block, statedb *state.StateDB, orcaObserver *orcanitrofeed.SweepObserver) (*state.StateDB, error) {
+// 반환값: 다음 블록에 물려줄 post-state (skip 시 nil — fresh open), skip 여부.
+func (s *BlocksReExecutor) reExecuteHistoricBlock(block *types.Block, statedb *state.StateDB, orcaObserver *orcanitrofeed.SweepObserver) (*state.StateDB, bool, error) {
 	blockNum := block.NumberU64()
 	if statedb == nil {
 		parent := s.blockchain.GetHeader(block.ParentHash(), blockNum-1)
 		if parent == nil {
-			return nil, fmt.Errorf("parent header of block %d not found", blockNum)
+			return nil, false, fmt.Errorf("parent header of block %d not found", blockNum)
 		}
 		// 최근 블록은 live pathdb(diff layer·persistent)에서, 오래된 블록은 state history
 		// freezer(HistoricReader)에서 읽는다.
@@ -498,7 +518,7 @@ func (s *BlocksReExecutor) reExecuteHistoricBlock(block *types.Block, statedb *s
 			statedb, err = state.New(parent.Root, s.historicDB)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("historic state at block %d (root %v): %w", blockNum-1, parent.Root, err)
+			return nil, false, fmt.Errorf("historic state at block %d (root %v): %w", blockNum-1, parent.Root, err)
 		}
 	}
 	vmConfig := vm.Config{ExposeMultiGas: s.config.ValidateMultiGas}
@@ -507,7 +527,7 @@ func (s *BlocksReExecutor) reExecuteHistoricBlock(block *types.Block, statedb *s
 	}
 	result, err := s.blockchain.Processor().Process(block, statedb, vmConfig)
 	if err != nil {
-		return nil, fmt.Errorf("processing block %d: %w", blockNum, err)
+		return nil, false, fmt.Errorf("processing block %d: %w", blockNum, err)
 	}
 	receipts := result.Receipts
 	if got := types.DeriveSha(receipts, trie.NewStackTrie(nil)); got != block.ReceiptHash() {
@@ -517,9 +537,9 @@ func (s *BlocksReExecutor) reExecuteHistoricBlock(block *types.Block, statedb *s
 				orcaObserver.OnBlockSkipped(block)
 			}
 			// 불일치 실행의 post-state는 신뢰 불가 — 다음 블록은 fresh open
-			return nil, nil
+			return nil, true, nil
 		}
-		return nil, fmt.Errorf("receipts root mismatch at block %d: got %v want %v", blockNum, got, block.ReceiptHash())
+		return nil, false, fmt.Errorf("receipts root mismatch at block %d: got %v want %v", blockNum, got, block.ReceiptHash())
 	}
 	if result.GasUsed != block.GasUsed() {
 		if s.config.SkipOnMismatch {
@@ -527,14 +547,14 @@ func (s *BlocksReExecutor) reExecuteHistoricBlock(block *types.Block, statedb *s
 			if orcaObserver != nil {
 				orcaObserver.OnBlockSkipped(block)
 			}
-			return nil, nil
+			return nil, true, nil
 		}
-		return nil, fmt.Errorf("gas used mismatch at block %d: got %d want %d", blockNum, result.GasUsed, block.GasUsed())
+		return nil, false, fmt.Errorf("gas used mismatch at block %d: got %d want %d", blockNum, result.GasUsed, block.GasUsed())
 	}
 	if orcaObserver != nil {
 		orcaObserver.OnBlockExecuted(block, receipts, statedb)
 	}
-	return statedb, nil
+	return statedb, false, nil
 }
 
 // implAscending — path 모드 chunk 스케줄러. (startBlock, endBlock]을 chunkSize 단위

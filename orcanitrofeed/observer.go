@@ -98,6 +98,7 @@ func (o *BlockObserver) OnBlockSealed(block *types.Block) {
 		SameTimestampIndex: o.sameTimestampIndex,
 		ReceiptCount:       o.dispatchedReceipts,
 		L1BlockNumber:      o.l1BlockNumber,
+		L2Timestamp:        o.l2Timestamp,
 	})
 }
 

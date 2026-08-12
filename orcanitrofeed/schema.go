@@ -6,9 +6,11 @@ package orcanitrofeed
 //go:generate msgp -tests=false
 
 // SchemaVersion은 hello frame으로 전달되어 클라이언트와의 lockstep 배포를 검증한다.
-// 프로덕션 배포 전까지는 v1으로 고정한다 — 개발 중 필드 변경은 양쪽을 함께 고치고
-// golden fixture만 재생성한다 (bump는 배포된 컨슈머가 생긴 뒤부터).
-const SchemaVersion uint32 = 1
+// v2: BlockSealMsg.L2Timestamp + pools.trade launcher TARGET(Named Call 추가)을
+// 묶는 bump — v1 컨슈머(라이브 feeder)가 배포돼 있으므로 dispatch 출력이 바뀌는
+// 변경은 여기서부터 버전으로 가른다. feed 풀도 schema 버전별로 분리된다
+// (orca-docs skills/rhc-backtest §schema 풀).
+const SchemaVersion uint32 = 2
 
 // 프레임 형식: [u32 LE payload length][u8 MsgType][msgpack payload]
 type MsgType byte

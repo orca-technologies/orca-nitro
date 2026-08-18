@@ -89,12 +89,32 @@ func init() {
 	// duplicates them. If wire volume matters more, delete this line — no
 	// decoder depends on it.
 	add("0xa0177CF584E06f4E7876d7bf0b2D5016e0d8a1fa", [4]byte{0x27, 0xa1, 0x09, 0x8d}) // launch(string,string,(string,string,string,uint256),uint256,bytes32)
-	// UniversalRouter 0x8876789976dEcBfCbBbe364623C63652db8C0904 execute() is deliberately
-	// NOT a target here. It is the chain-wide swap router (5.5M txs vs 10k on the launcher),
-	// and pools.trade launch detection needs none of it — launches are found on the log axis
-	// and their metadata comes from the launcher calldata above. Add it when the executor
-	// actually needs own/competitor fill attribution, and add BOTH overloads then:
-	// execute(bytes,bytes[],uint256) 0x3593564c and execute(bytes,bytes[]) 0x24856bc3.
+	// Buy entrypoints (schema v3) — 매수가 최종적으로 무조건 도달하는 프로토콜
+	// 진입점만 등록한다. 어떤 앞단(1inch·OKX·Settler·RH router·AA·multicall)을
+	// 거치든 이 진입점 frame이 자기 TARGET hit로 잡히므로 (matching is
+	// per-frame), 진입점에서만 기록하면 경로와 무관하게 체결당 정확히 한 번
+	// 세진다. 앞단 라우터를 추가로 등록하면 같은 체결이 두 곳에서 잡혀 dedup
+	// 부담만 생긴다 — 등록하지 않는다.
+	//
+	// UniversalRouter는 체인 전체 스왑 라우터다 (5.5M txs vs 10k on the
+	// launcher). depth 0 hit의 Input은 ReceiptMsg.Calldata와 중복이라 순수 wire
+	// 비용인데, 선언 하한(minAmountOut)의 소유자를 depth로 가르는 축이 필요해
+	// 일단 전 depth를 기록한다. smoke sweep 물량 계측 후 depth>0 필터를 붙일지
+	// 결정한다 (그 경우 depth 0 축은 ReceiptMsg.Calldata 디코드로 복원 가능).
+	universalRouter := "0x8876789976dEcBfCbBbe364623C63652db8C0904"
+	add(universalRouter, [4]byte{0x35, 0x93, 0x56, 0x4c}) // execute(bytes,bytes[],uint256)
+	add(universalRouter, [4]byte{0x24, 0x85, 0x6b, 0xc3}) // execute(bytes,bytes[])
+	// SwapRouter02 — V3 pad 스왑 진입점.
+	swapRouter02 := "0xCaf681a66D020601342297493863E78C959E5cb2"
+	add(swapRouter02, [4]byte{0x04, 0xe4, 0x5a, 0xaf}) // exactInputSingle(ExactInputSingleParams)
+	add(swapRouter02, [4]byte{0xb8, 0x58, 0x18, 0x3f}) // exactInput(ExactInputParams)
+	// Flap Portal — swapExactInput이 curve·졸업 양 단계의 유일한 live 경로
+	// (legacy buy/sell은 FeatureDisabled revert).
+	add(flapPortal, [4]byte{0xef, 0x7e, 0xc2, 0xe7}) // swapExactInput(ExactInputParams)
+	// Pons v2 curve buy(uint256,uint256,address) 0x59a87bc1은 아직 등록하지
+	// 못한다 — 타깃이 launch마다 뜨는 per-token CREATE2 curve라 exact (to,
+	// selector) 매칭으로는 잡을 수 없다. selector-only 매치 모드(충돌은 Rust
+	// 디코더의 drop으로 방어) 또는 codehash 매치가 필요하다 — 별도 결정.
 }
 
 // TargetCall — allowlist 매칭 공개 래퍼 (bandpatch 등 재구성 경로용).

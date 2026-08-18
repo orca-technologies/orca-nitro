@@ -28,6 +28,8 @@ type Collector struct {
 	pending   *pendingSub // 쌍 대기 중인 Transfer sub 이벤트
 	txFrom    common.Address
 	tx        *types.Transaction
+	// top-level frame revert return data (tx 실패 시), revertDataCap 캡.
+	revertOutput []byte
 
 	// sweep 경로: OnTxEnd(receipt) 시점 콜백 — receipt와 수집분이 정렬돼 전달된다
 	onTxEnd func(tx *types.Transaction, from common.Address, receipt *types.Receipt, transfers []TransferRecord)
@@ -38,6 +40,23 @@ type frameMark struct {
 	startIdx     int // 이 frame 진입 시점의 records 길이
 	logStartIdx  int // 이 frame 진입 시점의 logs 길이
 	callStartIdx int // 이 frame 진입 시점의 calls 길이
+	selfCallIdx  int // 이 frame 자신이 남긴 call record 인덱스, 없으면 -1
+}
+
+// revert return data 캡 — 공격자 제어 무한 바이트 방지 (Error(string)·custom
+// error 판별에는 수십 바이트면 충분).
+const revertDataCap = 512
+
+// CapRevertData — revert return data를 revertDataCap으로 잘라 소유 슬라이스로 복사한다
+// (collector·bandpatch 공용).
+func CapRevertData(output []byte) []byte {
+	if len(output) == 0 {
+		return nil
+	}
+	n := min(len(output), revertDataCap)
+	out := make([]byte, n)
+	copy(out, output[:n])
+	return out
 }
 
 type pendingSub struct {
@@ -64,16 +83,17 @@ var includedReasons = map[tracing.BalanceChangeReason]bool{
 
 func NewCollector() *Collector {
 	c := &Collector{
-		hooks:     nil,
-		records:   nil,
-		logs:      nil,
-		calls:     nil,
-		innerNext: 0,
-		frames:    nil,
-		pending:   nil,
-		txFrom:    common.Address{},
-		tx:        nil,
-		onTxEnd:   nil,
+		hooks:        nil,
+		records:      nil,
+		logs:         nil,
+		calls:        nil,
+		innerNext:    0,
+		frames:       nil,
+		pending:      nil,
+		txFrom:       common.Address{},
+		tx:           nil,
+		revertOutput: nil,
+		onTxEnd:      nil,
 	}
 	c.hooks = &tracing.Hooks{
 		OnTxStart:       c.onTxStartHook,
@@ -111,6 +131,7 @@ func (c *Collector) Reset() {
 	c.innerNext = 0
 	c.frames = c.frames[:0]
 	c.pending = nil
+	c.revertOutput = nil
 }
 
 // DrainLogs — revert되지 않은 로그를 방출 순서대로 반환한다.
@@ -123,6 +144,12 @@ func (c *Collector) DrainLogs() []LogRecord {
 // 반환 슬라이스는 다음 tx 수집 시작(Reset) 전까지만 유효 — 이후 재사용된다.
 func (c *Collector) DrainCalls() []WhitelistedCallRecord {
 	return c.calls
+}
+
+// DrainRevertOutput — top-level frame revert return data (tx 실패 시), 없으면 nil.
+// CapRevertData가 복사한 소유 슬라이스라 Reset 이후에도 안전하다.
+func (c *Collector) DrainRevertOutput() []byte {
+	return c.revertOutput
 }
 
 func (c *Collector) onLog(log *types.Log) {
@@ -175,6 +202,7 @@ func (c *Collector) onEnter(depth int, _ byte, _ common.Address, to common.Addre
 		startIdx:     len(c.records),
 		logStartIdx:  len(c.logs),
 		callStartIdx: len(c.calls),
+		selfCallIdx:  -1,
 	})
 	if sel, ok := isTarget(to, input); ok {
 		var valueBytes []byte
@@ -186,20 +214,22 @@ func (c *Collector) onEnter(depth int, _ byte, _ common.Address, to common.Addre
 		//   note: TARGET input 복사 — tracing 버퍼 재사용 방지
 		inputCopy := make([]byte, len(input))
 		copy(inputCopy, input)
+		c.frames[len(c.frames)-1].selfCallIdx = len(c.calls)
 		// #nosec G115
 		c.calls = append(c.calls, WhitelistedCallRecord{
-			To:         to,
-			Selector:   sel,
-			Input:      inputCopy,
-			Value:      valueBytes,
-			Depth:      uint16(depth),
-			Reverted:   false,
-			InnerIndex: c.nextInner(),
+			To:           to,
+			Selector:     sel,
+			Input:        inputCopy,
+			Value:        valueBytes,
+			Depth:        uint16(depth),
+			Reverted:     false,
+			InnerIndex:   c.nextInner(),
+			RevertReason: nil,
 		})
 	}
 }
 
-func (c *Collector) onExit(_ int, _ []byte, _ uint64, _ error, reverted bool) {
+func (c *Collector) onExit(_ int, output []byte, _ uint64, _ error, reverted bool) {
 	c.flushPending()
 	if len(c.frames) == 0 {
 		return
@@ -216,6 +246,15 @@ func (c *Collector) onExit(_ int, _ []byte, _ uint64, _ error, reverted bool) {
 		}
 		// 로그는 receipt.Logs에 남지 않으므로 버린다 — 시퀀스 번호는 이미 소비됐다.
 		c.logs = c.logs[:frame.logStartIdx]
+		// revert reason은 revert한 frame **자신**의 record에만 싣는다 (하위 전파
+		// 금지 — 자식 record는 자기 onExit에서 자기 output을 받는다).
+		if frame.selfCallIdx >= 0 {
+			c.calls[frame.selfCallIdx].RevertReason = CapRevertData(output)
+		}
+		// 최상위 frame revert = tx 실패 — ReceiptMsg.RevertOutput.
+		if len(c.frames) == 0 {
+			c.revertOutput = CapRevertData(output)
+		}
 	}
 }
 

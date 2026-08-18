@@ -52,7 +52,7 @@ func fixtureDiff() *PrestateDiff {
 }
 
 func TestReconstructTxTransfersAndRevert(t *testing.T) {
-	transfers, logs, _, degraded := ReconstructTx(fixtureFrame(), fixtureDiff(), addrA, coin)
+	transfers, logs, _, _, degraded := ReconstructTx(fixtureFrame(), fixtureDiff(), addrA, coin)
 	if degraded {
 		t.Fatal("post-balance validation should pass")
 	}
@@ -106,7 +106,7 @@ func TestReconstructTxTransfersAndRevert(t *testing.T) {
 func TestReconstructTxValidationDegrades(t *testing.T) {
 	diff := fixtureDiff()
 	diff.Post[addrC] = PrestateAccount{Balance: hb(999)} // 고의 불일치
-	transfers, _, _, degraded := ReconstructTx(fixtureFrame(), diff, addrA, coin)
+	transfers, _, _, _, degraded := ReconstructTx(fixtureFrame(), diff, addrA, coin)
 	if !degraded {
 		t.Fatal("expected degraded=true on post mismatch")
 	}
@@ -129,7 +129,7 @@ func TestReconstructTxArbTransfers(t *testing.T) {
 		Pre:  map[common.Address]PrestateAccount{addrB: {Balance: hb(10)}},
 		Post: map[common.Address]PrestateAccount{addrB: {Balance: hb(12)}},
 	}
-	transfers, _, _, degraded := ReconstructTx(frame, diff, addrA, coin)
+	transfers, _, _, _, degraded := ReconstructTx(frame, diff, addrA, coin)
 	if len(transfers) != 1 {
 		t.Fatalf("expected 1 transfer (deposit only), got: %+v", transfers)
 	}

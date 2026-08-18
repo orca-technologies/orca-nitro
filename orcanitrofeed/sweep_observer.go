@@ -26,10 +26,11 @@ type SweepObserver struct {
 }
 
 type txCapture struct {
-	from      common.Address
-	transfers []TransferRecord
-	logs      []LogRecord
-	calls     []WhitelistedCallRecord
+	from         common.Address
+	transfers    []TransferRecord
+	logs         []LogRecord
+	calls        []WhitelistedCallRecord
+	revertOutput []byte
 }
 
 func NewSweepObserver(sink Sink, ranges [][2]uint64, lookback uint64, headerTime HeaderTimeFunc) *SweepObserver {
@@ -44,7 +45,7 @@ func NewSweepObserver(sink Sink, ranges [][2]uint64, lookback uint64, headerTime
 		if tx == nil {
 			return
 		}
-		cp := &txCapture{from: from, transfers: nil, logs: nil, calls: nil}
+		cp := &txCapture{from: from, transfers: nil, logs: nil, calls: nil, revertOutput: nil}
 		if len(transfers) > 0 {
 			cp.transfers = make([]TransferRecord, len(transfers))
 			copy(cp.transfers, transfers)
@@ -57,6 +58,7 @@ func NewSweepObserver(sink Sink, ranges [][2]uint64, lookback uint64, headerTime
 			cp.calls = make([]WhitelistedCallRecord, len(cs))
 			copy(cp.calls, cs)
 		}
+		cp.revertOutput = o.collector.DrainRevertOutput()
 		o.txCaps[tx.Hash()] = cp
 	})
 	return o
@@ -87,13 +89,15 @@ func (o *SweepObserver) OnBlockExecuted(block *types.Block, receipts types.Recei
 		var transfers []TransferRecord
 		var logs []LogRecord
 		var calls []WhitelistedCallRecord
+		var revertOutput []byte
 		if cp, ok := o.txCaps[tx.Hash()]; ok {
 			sender = cp.from
 			transfers = cp.transfers
 			logs = cp.logs
 			calls = cp.calls
+			revertOutput = cp.revertOutput
 		}
-		msg := NewReceiptMsg(blockNumber, block.Time(), l1BlockNumber, index, i, tx, sender, receipts[i], transfers, logs, calls,
+		msg := NewReceiptMsg(blockNumber, block.Time(), l1BlockNumber, index, i, tx, sender, receipts[i], transfers, logs, calls, revertOutput,
 			func(addr common.Address) uint8 { return accountKindCached(statedb, codeCache, addr) })
 		o.sink.Enqueue(MsgReceipt, msg)
 		receiptCount++

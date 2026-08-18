@@ -10,7 +10,9 @@ package orcanitrofeed
 // 묶는 bump — v1 컨슈머(라이브 feeder)가 배포돼 있으므로 dispatch 출력이 바뀌는
 // 변경은 여기서부터 버전으로 가른다. feed 풀도 schema 버전별로 분리된다
 // (orca-docs skills/rhc-backtest §schema 풀).
-const SchemaVersion uint32 = 2
+// v3: WhitelistedCallRecord.RevertReason + ReceiptMsg.RevertOutput + 매수
+// 진입점 TARGET(UniversalRouter·SwapRouter02·Flap swapExactInput)을 묶는 bump.
+const SchemaVersion uint32 = 3
 
 // 프레임 형식: [u32 LE payload length][u8 MsgType][msgpack payload]
 type MsgType byte
@@ -79,6 +81,9 @@ type WhitelistedCallRecord struct {
 	Depth      uint16
 	Reverted   bool
 	InnerIndex uint16
+	// 이 frame 자신이 revert했을 때의 return data (Error(string)/custom error,
+	// revertDataCap 캡). 하위 트리 전파로 Reverted만 true인 record는 nil.
+	RevertReason []byte
 }
 
 //msgp:tuple ReceiptMsg
@@ -116,6 +121,9 @@ type ReceiptMsg struct {
 	// 같은 L2Timestamp(header unix sec)를 가진 연속 블록 안 0-based index.
 	// feed timestamp_ns order의 block_rel (5 bit, cap 31).
 	SameTimestampIndex uint32
+	// top-level frame revert return data (Status == 0일 때, revertDataCap 캡).
+	// TARGET 미등록 실패 tx의 revert reason까지 커버한다.
+	RevertOutput []byte
 }
 
 //msgp:tuple BlockSealMsg

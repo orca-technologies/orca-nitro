@@ -665,8 +665,8 @@ func (z *ReceiptMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 25 {
-		err = msgp.ArrayError{Wanted: 25, Got: zb0001}
+	if zb0001 != 26 {
+		err = msgp.ArrayError{Wanted: 26, Got: zb0001}
 		return
 	}
 	z.Seq, err = dc.ReadUint64()
@@ -833,13 +833,18 @@ func (z *ReceiptMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 		err = msgp.WrapError(err, "SameTimestampIndex")
 		return
 	}
+	z.RevertOutput, err = dc.ReadBytes(z.RevertOutput)
+	if err != nil {
+		err = msgp.WrapError(err, "RevertOutput")
+		return
+	}
 	return
 }
 
 // EncodeMsg implements msgp.Encodable
 func (z *ReceiptMsg) EncodeMsg(en *msgp.Writer) (err error) {
-	// array header, size 25
-	err = en.Append(0xdc, 0x0, 0x19)
+	// array header, size 26
+	err = en.Append(0xdc, 0x0, 0x1a)
 	if err != nil {
 		return
 	}
@@ -989,14 +994,19 @@ func (z *ReceiptMsg) EncodeMsg(en *msgp.Writer) (err error) {
 		err = msgp.WrapError(err, "SameTimestampIndex")
 		return
 	}
+	err = en.WriteBytes(z.RevertOutput)
+	if err != nil {
+		err = msgp.WrapError(err, "RevertOutput")
+		return
+	}
 	return
 }
 
 // MarshalMsg implements msgp.Marshaler
 func (z *ReceiptMsg) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.Require(b, z.Msgsize())
-	// array header, size 25
-	o = append(o, 0xdc, 0x0, 0x19)
+	// array header, size 26
+	o = append(o, 0xdc, 0x0, 0x1a)
 	o = msgp.AppendUint64(o, z.Seq)
 	o = msgp.AppendUint64(o, z.BlockNumber)
 	o = msgp.AppendUint32(o, z.TxIndex)
@@ -1043,6 +1053,7 @@ func (z *ReceiptMsg) MarshalMsg(b []byte) (o []byte, err error) {
 	}
 	o = msgp.AppendUint64(o, z.EmittedAtNs)
 	o = msgp.AppendUint32(o, z.SameTimestampIndex)
+	o = msgp.AppendBytes(o, z.RevertOutput)
 	return
 }
 
@@ -1054,8 +1065,8 @@ func (z *ReceiptMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 25 {
-		err = msgp.ArrayError{Wanted: 25, Got: zb0001}
+	if zb0001 != 26 {
+		err = msgp.ArrayError{Wanted: 26, Got: zb0001}
 		return
 	}
 	z.Seq, bts, err = msgp.ReadUint64Bytes(bts)
@@ -1222,6 +1233,11 @@ func (z *ReceiptMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 		err = msgp.WrapError(err, "SameTimestampIndex")
 		return
 	}
+	z.RevertOutput, bts, err = msgp.ReadBytesBytes(bts, z.RevertOutput)
+	if err != nil {
+		err = msgp.WrapError(err, "RevertOutput")
+		return
+	}
 	o = bts
 	return
 }
@@ -1240,7 +1256,7 @@ func (z *ReceiptMsg) Msgsize() (s int) {
 	for za0006 := range z.Calls {
 		s += z.Calls[za0006].Msgsize()
 	}
-	s += msgp.Uint64Size + msgp.Uint32Size
+	s += msgp.Uint64Size + msgp.Uint32Size + msgp.BytesPrefixSize + len(z.RevertOutput)
 	return
 }
 
@@ -1451,8 +1467,8 @@ func (z *WhitelistedCallRecord) DecodeMsg(dc *msgp.Reader) (err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 7 {
-		err = msgp.ArrayError{Wanted: 7, Got: zb0001}
+	if zb0001 != 8 {
+		err = msgp.ArrayError{Wanted: 8, Got: zb0001}
 		return
 	}
 	err = dc.ReadExactBytes((z.To)[:])
@@ -1490,13 +1506,18 @@ func (z *WhitelistedCallRecord) DecodeMsg(dc *msgp.Reader) (err error) {
 		err = msgp.WrapError(err, "InnerIndex")
 		return
 	}
+	z.RevertReason, err = dc.ReadBytes(z.RevertReason)
+	if err != nil {
+		err = msgp.WrapError(err, "RevertReason")
+		return
+	}
 	return
 }
 
 // EncodeMsg implements msgp.Encodable
 func (z *WhitelistedCallRecord) EncodeMsg(en *msgp.Writer) (err error) {
-	// array header, size 7
-	err = en.Append(0x97)
+	// array header, size 8
+	err = en.Append(0x98)
 	if err != nil {
 		return
 	}
@@ -1535,14 +1556,19 @@ func (z *WhitelistedCallRecord) EncodeMsg(en *msgp.Writer) (err error) {
 		err = msgp.WrapError(err, "InnerIndex")
 		return
 	}
+	err = en.WriteBytes(z.RevertReason)
+	if err != nil {
+		err = msgp.WrapError(err, "RevertReason")
+		return
+	}
 	return
 }
 
 // MarshalMsg implements msgp.Marshaler
 func (z *WhitelistedCallRecord) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.Require(b, z.Msgsize())
-	// array header, size 7
-	o = append(o, 0x97)
+	// array header, size 8
+	o = append(o, 0x98)
 	o = msgp.AppendBytes(o, (z.To)[:])
 	o = msgp.AppendBytes(o, (z.Selector)[:])
 	o = msgp.AppendBytes(o, z.Input)
@@ -1550,6 +1576,7 @@ func (z *WhitelistedCallRecord) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.AppendUint16(o, z.Depth)
 	o = msgp.AppendBool(o, z.Reverted)
 	o = msgp.AppendUint16(o, z.InnerIndex)
+	o = msgp.AppendBytes(o, z.RevertReason)
 	return
 }
 
@@ -1561,8 +1588,8 @@ func (z *WhitelistedCallRecord) UnmarshalMsg(bts []byte) (o []byte, err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 7 {
-		err = msgp.ArrayError{Wanted: 7, Got: zb0001}
+	if zb0001 != 8 {
+		err = msgp.ArrayError{Wanted: 8, Got: zb0001}
 		return
 	}
 	bts, err = msgp.ReadExactBytes(bts, (z.To)[:])
@@ -1600,12 +1627,17 @@ func (z *WhitelistedCallRecord) UnmarshalMsg(bts []byte) (o []byte, err error) {
 		err = msgp.WrapError(err, "InnerIndex")
 		return
 	}
+	z.RevertReason, bts, err = msgp.ReadBytesBytes(bts, z.RevertReason)
+	if err != nil {
+		err = msgp.WrapError(err, "RevertReason")
+		return
+	}
 	o = bts
 	return
 }
 
 // Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
 func (z *WhitelistedCallRecord) Msgsize() (s int) {
-	s = 1 + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.ArrayHeaderSize + (4 * (msgp.ByteSize)) + msgp.BytesPrefixSize + len(z.Input) + msgp.BytesPrefixSize + len(z.Value) + msgp.Uint16Size + msgp.BoolSize + msgp.Uint16Size
+	s = 1 + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.ArrayHeaderSize + (4 * (msgp.ByteSize)) + msgp.BytesPrefixSize + len(z.Input) + msgp.BytesPrefixSize + len(z.Value) + msgp.Uint16Size + msgp.BoolSize + msgp.Uint16Size + msgp.BytesPrefixSize + len(z.RevertReason)
 	return
 }

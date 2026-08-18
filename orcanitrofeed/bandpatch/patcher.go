@@ -337,7 +337,7 @@ func (p *Patcher) patchBlock(ctx context.Context, n uint64) error {
 				return fmt.Errorf("tx %d prestate decode: %w", i, err)
 			}
 		}
-		transfers, logs, calls, degraded := ReconstructTx(&frame, &diff, env.from, head.Coinbase)
+		transfers, logs, calls, revertOutput, degraded := ReconstructTx(&frame, &diff, env.from, head.Coinbase)
 		if degraded {
 			p.stats.DegradedTxs++
 			log.Warn("bandpatch: post-balance validation failed, balances degraded to nil", "block", n, "tx", i)
@@ -346,7 +346,7 @@ func (p *Patcher) patchBlock(ctx context.Context, n uint64) error {
 			p.stats.LogFallbacks++
 		}
 		msg := orcanitrofeed.NewReceiptMsg(n, head.Time, extra.L1BlockNumber, bundle.SameTimestampIndex, i,
-			env.tx, env.from, receipts[i], transfers, logs, calls, accountKind)
+			env.tx, env.from, receipts[i], transfers, logs, calls, revertOutput, accountKind)
 		p.Sink.Enqueue(orcanitrofeed.MsgReceipt, msg)
 		receiptCount++
 		p.stats.Receipts++

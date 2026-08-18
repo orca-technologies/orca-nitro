@@ -31,11 +31,13 @@ type CallFrame struct {
 	To                 *common.Address `json:"to"`
 	Value              *hexutil.Big    `json:"value"`
 	Input              hexutil.Bytes   `json:"input"`
-	Error              string          `json:"error"`
-	Calls              []CallFrame     `json:"calls"`
-	Logs               []FrameLog      `json:"logs"`
-	BeforeEVMTransfers []ArbTransfer   `json:"beforeEVMTransfers"`
-	AfterEVMTransfers  []ArbTransfer   `json:"afterEVMTransfers"`
+	// revert된 frame이면 revert return data (callTracer `output`).
+	Output             hexutil.Bytes `json:"output"`
+	Error              string        `json:"error"`
+	Calls              []CallFrame   `json:"calls"`
+	Logs               []FrameLog    `json:"logs"`
+	BeforeEVMTransfers []ArbTransfer `json:"beforeEVMTransfers"`
+	AfterEVMTransfers  []ArbTransfer `json:"afterEVMTransfers"`
 }
 
 // FrameLog — position은 "이 로그보다 앞서 실행된 subcall 수".
@@ -96,9 +98,10 @@ type txReconstructor struct {
 
 // ReconstructTx — 한 tx의 callTracer frame + prestate diff에서 FEED 레코드를 복원한다.
 // degraded=true면 post balance 검증이 실패해 이 tx의 post balance를 모두 비웠다.
+// revertOutput은 top-level frame revert return data (tx 실패 시), 없으면 nil.
 func ReconstructTx(frame *CallFrame, diff *PrestateDiff, txFrom, coinbase common.Address) (
 	transfers []orcanitrofeed.TransferRecord, logs []orcanitrofeed.LogRecord,
-	calls []orcanitrofeed.WhitelistedCallRecord, degraded bool,
+	calls []orcanitrofeed.WhitelistedCallRecord, revertOutput []byte, degraded bool,
 ) {
 	r := &txReconstructor{
 		balances: make(map[common.Address]*big.Int),
@@ -119,8 +122,11 @@ func ReconstructTx(frame *CallFrame, diff *PrestateDiff, txFrom, coinbase common
 	for _, t := range frame.AfterEVMTransfers {
 		r.emitArbTransfer(t)
 	}
+	if frame.Error != "" {
+		revertOutput = orcanitrofeed.CapRevertData(frame.Output)
+	}
 	degraded = r.validateAgainstPost(diff)
-	return r.transfers, r.logs, r.calls, degraded
+	return r.transfers, r.logs, r.calls, revertOutput, degraded
 }
 
 func (r *txReconstructor) next() uint16 {
@@ -213,6 +219,7 @@ func hasEntryValueTransfer(typ string) bool {
 func (r *txReconstructor) walkFrame(f *CallFrame, depth uint16) {
 	tStart, cStart, lStart, jStart := len(r.transfers), len(r.calls), len(r.logs), len(r.journal)
 
+	selfCallIdx := -1
 	if f.To != nil {
 		if sel, ok := orcanitrofeed.TargetCall(*f.To, f.Input); ok {
 			var valueBytes []byte
@@ -221,6 +228,7 @@ func (r *txReconstructor) walkFrame(f *CallFrame, depth uint16) {
 			}
 			input := make([]byte, len(f.Input))
 			copy(input, f.Input)
+			selfCallIdx = len(r.calls)
 			r.calls = append(r.calls, orcanitrofeed.WhitelistedCallRecord{
 				To: *f.To, Selector: sel, Input: input, Value: valueBytes,
 				Depth: depth, Reverted: false, InnerIndex: r.next(),
@@ -272,6 +280,10 @@ func (r *txReconstructor) walkFrame(f *CallFrame, depth uint16) {
 			r.calls[i].Reverted = true
 		}
 		r.logs = r.logs[:lStart]
+		// collector.onExit와 동일 — revert reason은 이 frame 자신의 record에만.
+		if selfCallIdx >= 0 {
+			r.calls[selfCallIdx].RevertReason = orcanitrofeed.CapRevertData(f.Output)
+		}
 		r.rollback(jStart)
 	}
 }

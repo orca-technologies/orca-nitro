@@ -272,6 +272,11 @@ func (r *txReconstructor) walkFrame(f *CallFrame, depth uint16) {
 		}
 	}
 
+	// collector.onExit와 동일 — exit 시점 시퀀스 값이 exclusive 상한.
+	if selfCallIdx >= 0 {
+		r.calls[selfCallIdx].ExitInnerIndex = r.seq
+	}
+
 	if f.Error != "" {
 		for i := tStart; i < len(r.transfers); i++ {
 			r.transfers[i].Reverted = true

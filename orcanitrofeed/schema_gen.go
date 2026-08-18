@@ -1467,8 +1467,8 @@ func (z *WhitelistedCallRecord) DecodeMsg(dc *msgp.Reader) (err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 8 {
-		err = msgp.ArrayError{Wanted: 8, Got: zb0001}
+	if zb0001 != 9 {
+		err = msgp.ArrayError{Wanted: 9, Got: zb0001}
 		return
 	}
 	err = dc.ReadExactBytes((z.To)[:])
@@ -1511,13 +1511,18 @@ func (z *WhitelistedCallRecord) DecodeMsg(dc *msgp.Reader) (err error) {
 		err = msgp.WrapError(err, "RevertReason")
 		return
 	}
+	z.ExitInnerIndex, err = dc.ReadUint16()
+	if err != nil {
+		err = msgp.WrapError(err, "ExitInnerIndex")
+		return
+	}
 	return
 }
 
 // EncodeMsg implements msgp.Encodable
 func (z *WhitelistedCallRecord) EncodeMsg(en *msgp.Writer) (err error) {
-	// array header, size 8
-	err = en.Append(0x98)
+	// array header, size 9
+	err = en.Append(0x99)
 	if err != nil {
 		return
 	}
@@ -1561,14 +1566,19 @@ func (z *WhitelistedCallRecord) EncodeMsg(en *msgp.Writer) (err error) {
 		err = msgp.WrapError(err, "RevertReason")
 		return
 	}
+	err = en.WriteUint16(z.ExitInnerIndex)
+	if err != nil {
+		err = msgp.WrapError(err, "ExitInnerIndex")
+		return
+	}
 	return
 }
 
 // MarshalMsg implements msgp.Marshaler
 func (z *WhitelistedCallRecord) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.Require(b, z.Msgsize())
-	// array header, size 8
-	o = append(o, 0x98)
+	// array header, size 9
+	o = append(o, 0x99)
 	o = msgp.AppendBytes(o, (z.To)[:])
 	o = msgp.AppendBytes(o, (z.Selector)[:])
 	o = msgp.AppendBytes(o, z.Input)
@@ -1577,6 +1587,7 @@ func (z *WhitelistedCallRecord) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.AppendBool(o, z.Reverted)
 	o = msgp.AppendUint16(o, z.InnerIndex)
 	o = msgp.AppendBytes(o, z.RevertReason)
+	o = msgp.AppendUint16(o, z.ExitInnerIndex)
 	return
 }
 
@@ -1588,8 +1599,8 @@ func (z *WhitelistedCallRecord) UnmarshalMsg(bts []byte) (o []byte, err error) {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 8 {
-		err = msgp.ArrayError{Wanted: 8, Got: zb0001}
+	if zb0001 != 9 {
+		err = msgp.ArrayError{Wanted: 9, Got: zb0001}
 		return
 	}
 	bts, err = msgp.ReadExactBytes(bts, (z.To)[:])
@@ -1632,12 +1643,17 @@ func (z *WhitelistedCallRecord) UnmarshalMsg(bts []byte) (o []byte, err error) {
 		err = msgp.WrapError(err, "RevertReason")
 		return
 	}
+	z.ExitInnerIndex, bts, err = msgp.ReadUint16Bytes(bts)
+	if err != nil {
+		err = msgp.WrapError(err, "ExitInnerIndex")
+		return
+	}
 	o = bts
 	return
 }
 
 // Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
 func (z *WhitelistedCallRecord) Msgsize() (s int) {
-	s = 1 + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.ArrayHeaderSize + (4 * (msgp.ByteSize)) + msgp.BytesPrefixSize + len(z.Input) + msgp.BytesPrefixSize + len(z.Value) + msgp.Uint16Size + msgp.BoolSize + msgp.Uint16Size + msgp.BytesPrefixSize + len(z.RevertReason)
+	s = 1 + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.ArrayHeaderSize + (4 * (msgp.ByteSize)) + msgp.BytesPrefixSize + len(z.Input) + msgp.BytesPrefixSize + len(z.Value) + msgp.Uint16Size + msgp.BoolSize + msgp.Uint16Size + msgp.BytesPrefixSize + len(z.RevertReason) + msgp.Uint16Size
 	return
 }

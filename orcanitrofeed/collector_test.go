@@ -397,3 +397,58 @@ func TestCollectorRevertReasonCapped(t *testing.T) {
 		t.Fatalf("capped bytes must be a prefix")
 	}
 }
+
+// v4: ExitInnerIndex — 중첩 Call·로그가 공유 시퀀스 위에서 exact 구간을
+// 이룬다: 프레임 소속 항목은 InnerIndex < i < ExitInnerIndex.
+func TestCollectorStampsExitInnerIndex(t *testing.T) {
+	c := NewCollector()
+	h := c.Hooks()
+	airlock := common.HexToAddress("0xeb7C034704eF8Dcd2D32324c1545f62fB4aD0862")
+	swapRouter := common.HexToAddress("0xCaf681a66D020601342297493863E78C959E5cb2")
+
+	// outer TARGET frame (inner=0) → log(1) → inner TARGET frame(2) → log(3)
+	// → inner exit → log(4) → outer exit
+	h.OnEnter(0, byte(vm.CALL), addrA, airlock, []byte{0x88, 0x2d, 0xb7, 0x07, 0x01}, 0, nil)
+	h.OnLog(&types.Log{Address: addrB})
+	h.OnEnter(1, byte(vm.CALL), airlock, swapRouter, []byte{0x42, 0x71, 0x2a, 0x67, 0x02}, 0, nil)
+	h.OnLog(&types.Log{Address: addrB})
+	h.OnExit(1, nil, 0, nil, false)
+	h.OnLog(&types.Log{Address: addrB})
+	h.OnExit(0, nil, 0, nil, false)
+
+	calls := c.DrainCalls()
+	if len(calls) != 2 {
+		t.Fatalf("WhitelistedCallRecord 수: %d", len(calls))
+	}
+	outer, inner := calls[0], calls[1]
+	if outer.InnerIndex != 0 || outer.ExitInnerIndex != 5 {
+		t.Fatalf("outer span: [%d, %d)", outer.InnerIndex, outer.ExitInnerIndex)
+	}
+	if inner.InnerIndex != 2 || inner.ExitInnerIndex != 4 {
+		t.Fatalf("inner span: [%d, %d)", inner.InnerIndex, inner.ExitInnerIndex)
+	}
+	// inner frame이 닫힌 뒤의 로그(4)는 outer 구간에만 든다.
+	if !(outer.InnerIndex < 4 && 4 < outer.ExitInnerIndex) || inner.ExitInnerIndex <= 3 {
+		t.Fatalf("containment: outer=[%d,%d) inner=[%d,%d)",
+			outer.InnerIndex, outer.ExitInnerIndex, inner.InnerIndex, inner.ExitInnerIndex)
+	}
+}
+
+// revert된 frame도 span은 남는다 (시도 axis + 하위 Call 귀속).
+func TestCollectorExitIndexOnRevertedFrame(t *testing.T) {
+	c := NewCollector()
+	h := c.Hooks()
+	swapRouter := common.HexToAddress("0xCaf681a66D020601342297493863E78C959E5cb2")
+	h.OnEnter(0, byte(vm.CALL), addrA, swapRouter, []byte{0x42, 0x71, 0x2a, 0x67, 0x02}, 0, nil)
+	h.OnLog(&types.Log{Address: addrB}) // revert로 폐기되지만 시퀀스는 소비됨
+	h.OnExit(0, []byte{0x08, 0xc3, 0x79, 0xa0}, 0, nil, true)
+
+	calls := c.DrainCalls()
+	if len(calls) != 1 {
+		t.Fatalf("WhitelistedCallRecord 수: %d", len(calls))
+	}
+	r := calls[0]
+	if !r.Reverted || r.InnerIndex != 0 || r.ExitInnerIndex != 2 {
+		t.Fatalf("reverted span: %+v", r)
+	}
+}

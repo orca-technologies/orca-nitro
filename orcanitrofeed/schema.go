@@ -12,7 +12,9 @@ package orcanitrofeed
 // (orca-docs skills/rhc-backtest §schema 풀).
 // v3: WhitelistedCallRecord.RevertReason + ReceiptMsg.RevertOutput + 매수
 // 진입점 TARGET(UniversalRouter·SwapRouter02·Flap swapExactInput)을 묶는 bump.
-const SchemaVersion uint32 = 3
+// v4: WhitelistedCallRecord.ExitInnerIndex — frame exit 시점의 inner 시퀀스
+// (exclusive 상한). fill/log의 Call 프레임 귀속을 exact 구간 포함으로 만든다.
+const SchemaVersion uint32 = 4
 
 // 프레임 형식: [u32 LE payload length][u8 MsgType][msgpack payload]
 type MsgType byte
@@ -84,6 +86,9 @@ type WhitelistedCallRecord struct {
 	// 이 frame 자신이 revert했을 때의 return data (Error(string)/custom error,
 	// revertDataCap 캡). 하위 트리 전파로 Reverted만 true인 record는 nil.
 	RevertReason []byte
+	// frame exit 시점의 inner 시퀀스 값 (exclusive 상한) — 이 frame에 속한
+	// 로그·transfer·하위 Call은 InnerIndex < i < ExitInnerIndex.
+	ExitInnerIndex uint16
 }
 
 //msgp:tuple ReceiptMsg

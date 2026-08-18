@@ -236,6 +236,11 @@ func (c *Collector) onExit(_ int, output []byte, _ uint64, _ error, reverted boo
 	}
 	frame := c.frames[len(c.frames)-1]
 	c.frames = c.frames[:len(c.frames)-1]
+	if frame.selfCallIdx >= 0 {
+		// exit 시점의 inner 시퀀스 = exclusive 상한. revert 여부 무관 — 시도
+		// frame의 span도 하위 Call 귀속 판정에 쓰인다.
+		c.calls[frame.selfCallIdx].ExitInnerIndex = c.innerNext
+	}
 	if reverted {
 		// transfer·WhitelistedCallRecord는 "시도됐다 무효화됨"이 신호가 되므로 플래그만 세운다.
 		for i := frame.startIdx; i < len(c.records); i++ {

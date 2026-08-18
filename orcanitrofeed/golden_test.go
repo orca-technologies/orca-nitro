@@ -40,9 +40,17 @@ func goldenMessages() map[string]msgp.Marshaler {
 				To: addr(0xeb), Selector: [4]byte{0x88, 0x2d, 0xb7, 0x07},
 				Input: []byte{0x88, 0x2d, 0xb7, 0x07, 0xca}, Value: nil,
 				Depth: 1, Reverted: false, InnerIndex: 2,
+			}, {
+				// v3: revert된 시도 — RevertReason 커버리지.
+				To: addr(0x88), Selector: [4]byte{0x35, 0x93, 0x56, 0x4c},
+				Input: []byte{0x35, 0x93, 0x56, 0x4c, 0x01}, Value: []byte{0x64},
+				Depth: 0, Reverted: true, InnerIndex: 3,
+				RevertReason: []byte{0x08, 0xc3, 0x79, 0xa0, 0xaa},
 			}},
 			EmittedAtNs:        1_753_689_600_123_456_789,
 			SameTimestampIndex: 2,
+			// v3: top-level revert output 커버리지 (Status=1 샘플이지만 wire 형상 고정 목적).
+			RevertOutput: []byte{0x08, 0xc3, 0x79, 0xa0, 0xbb},
 		},
 		"blockseal": &BlockSealMsg{
 			Seq: 8, BlockNumber: 123456, TxCount: 3,

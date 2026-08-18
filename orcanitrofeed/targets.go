@@ -14,9 +14,17 @@ type targetKey struct {
 
 var targets = map[targetKey]struct{}{}
 
+// selector-only allowlist — 타깃 주소가 launch마다 뜨는 CREATE2 계열
+// (Pons v2 curve)용. 주소 무관 매치라 무관 컨트랙트의 동일 selector 호출도
+// record로 남는다 (Rust 디코더/다운스트림이 거른다).
+var selectorOnlyTargets = map[[4]byte]struct{}{}
+
 func init() {
 	add := func(toHex string, sel [4]byte) {
 		targets[targetKey{to: common.HexToAddress(toHex), sel: sel}] = struct{}{}
+	}
+	addSelectorOnly := func(sel [4]byte) {
+		selectorOnlyTargets[sel] = struct{}{}
 	}
 	// Airlock.create(CreateParams) — two deployments on RHC
 	add("0xeb7C034704eF8Dcd2D32324c1545f62fB4aD0862", [4]byte{0x88, 0x2d, 0xb7, 0x07})
@@ -104,17 +112,26 @@ func init() {
 	universalRouter := "0x8876789976dEcBfCbBbe364623C63652db8C0904"
 	add(universalRouter, [4]byte{0x35, 0x93, 0x56, 0x4c}) // execute(bytes,bytes[],uint256)
 	add(universalRouter, [4]byte{0x24, 0x85, 0x6b, 0xc3}) // execute(bytes,bytes[])
-	// SwapRouter02 — V3 pad 스왑 진입점.
+	// SwapRouter02 — V2·V3 pad 스왑 진입점. 스왑 한계를 싣는 함수 6종 전부
+	// (multicall 래퍼는 넣지 않는다 — 안쪽 스왑 frame이 자기 TARGET hit로
+	// 잡힌다. 나머지 함수는 정산·승인·LP라 스왑이 아니다).
 	swapRouter02 := "0xCaf681a66D020601342297493863E78C959E5cb2"
 	add(swapRouter02, [4]byte{0x04, 0xe4, 0x5a, 0xaf}) // exactInputSingle(ExactInputSingleParams)
 	add(swapRouter02, [4]byte{0xb8, 0x58, 0x18, 0x3f}) // exactInput(ExactInputParams)
+	add(swapRouter02, [4]byte{0x50, 0x23, 0xb4, 0xdf}) // exactOutputSingle(ExactOutputSingleParams)
+	add(swapRouter02, [4]byte{0x09, 0xb8, 0x13, 0x46}) // exactOutput(ExactOutputParams)
+	add(swapRouter02, [4]byte{0x47, 0x2b, 0x43, 0xf3}) // swapExactTokensForTokens(uint256,uint256,address[],address)
+	add(swapRouter02, [4]byte{0x42, 0x71, 0x2a, 0x67}) // swapTokensForExactTokens(uint256,uint256,address[],address)
 	// Flap Portal — swapExactInput이 curve·졸업 양 단계의 유일한 live 경로
-	// (legacy buy/sell은 FeatureDisabled revert).
+	// (legacy buy/sell은 FeatureDisabled revert). 매수·매도는 토큰 leg 방향.
 	add(flapPortal, [4]byte{0xef, 0x7e, 0xc2, 0xe7}) // swapExactInput(ExactInputParams)
-	// Pons v2 curve buy(uint256,uint256,address) 0x59a87bc1은 아직 등록하지
-	// 못한다 — 타깃이 launch마다 뜨는 per-token CREATE2 curve라 exact (to,
-	// selector) 매칭으로는 잡을 수 없다. selector-only 매치 모드(충돌은 Rust
-	// 디코더의 drop으로 방어) 또는 codehash 매치가 필요하다 — 별도 결정.
+	// Pons v2 curve buy/sell — 타깃이 launch마다 뜨는 per-token CREATE2
+	// curve라 exact (to, selector) 매칭이 불가능해 **selector-only** 로
+	// 잡는다. 같은 selector의 무관 컨트랙트 호출이 섞일 수 있다 — record는
+	// 넓게 남고, curve 여부 판별은 Rust 쪽(chain state curve→token 매핑)이
+	// 한다. 물량은 smoke sweep에서 계측한다.
+	addSelectorOnly([4]byte{0x59, 0xa8, 0x7b, 0xc1}) // buy(uint256,uint256,address)
+	addSelectorOnly([4]byte{0xd0, 0x4c, 0x69, 0x83}) // sell(uint256,uint256,address)
 }
 
 // TargetCall — allowlist 매칭 공개 래퍼 (bandpatch 등 재구성 경로용).
@@ -127,6 +144,9 @@ func isTarget(to common.Address, input []byte) (sel [4]byte, ok bool) {
 		return sel, false
 	}
 	copy(sel[:], input[:4])
-	_, ok = targets[targetKey{to: to, sel: sel}]
+	if _, ok = targets[targetKey{to: to, sel: sel}]; ok {
+		return sel, true
+	}
+	_, ok = selectorOnlyTargets[sel]
 	return sel, ok
 }

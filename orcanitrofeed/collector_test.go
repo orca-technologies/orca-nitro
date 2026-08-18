@@ -1,6 +1,7 @@
 package orcanitrofeed
 
 import (
+	"bytes"
 	"math/big"
 	"testing"
 
@@ -335,5 +336,64 @@ func TestCollectorMarksRevertedCallRecord(t *testing.T) {
 	calls := c.DrainCalls()
 	if len(calls) != 1 || !calls[0].Reverted {
 		t.Fatalf("revert WhitelistedCallRecord: %+v", calls)
+	}
+}
+
+// RevertReason은 revert한 frame **자신**의 record에만 실린다. 하위 트리 전파로
+// Reverted만 켜진 record는 nil로 남고, 최상위 frame revert는 tx-level
+// RevertOutput으로 잡힌다.
+func TestCollectorRevertReasonOnSelfRecordOnly(t *testing.T) {
+	c := NewCollector()
+	h := c.Hooks()
+	ur := common.HexToAddress("0x8876789976dEcBfCbBbe364623C63652db8C0904")
+	pons := common.HexToAddress("0xA5aAb3F0c6EeadF30Ef1D3Eb997108E976351feB")
+	urInput := []byte{0x35, 0x93, 0x56, 0x4c, 0x01}
+	ponsInput := []byte{0x68, 0x63, 0x99, 0xcb, 0x01}
+	innerReason := []byte{0x08, 0xc3, 0x79, 0xa0, 0x11}
+	topReason := []byte{0x08, 0xc3, 0x79, 0xa0, 0x22}
+
+	// depth 0: UR TARGET frame — 안에서 pons TARGET frame이 자기 이유로 revert,
+	// 이어서 최상위도 revert.
+	h.OnEnter(0, byte(vm.CALL), addrA, ur, urInput, 0, nil)
+	h.OnEnter(1, byte(vm.CALL), ur, pons, ponsInput, 0, nil)
+	h.OnExit(1, innerReason, 0, nil, true)
+	h.OnExit(0, topReason, 0, nil, true)
+
+	calls := c.DrainCalls()
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 records, got %+v", calls)
+	}
+	if !bytes.Equal(calls[0].RevertReason, topReason) {
+		t.Fatalf("UR frame must carry its own revert output: %+v", calls[0])
+	}
+	if !bytes.Equal(calls[1].RevertReason, innerReason) {
+		t.Fatalf("inner frame must carry its own revert output: %+v", calls[1])
+	}
+	if !calls[0].Reverted || !calls[1].Reverted {
+		t.Fatalf("both records must be marked reverted: %+v", calls)
+	}
+	if !bytes.Equal(c.DrainRevertOutput(), topReason) {
+		t.Fatalf("tx-level revert output must be the top frame's: %x", c.DrainRevertOutput())
+	}
+}
+
+// 캡 초과 revert data는 revertDataCap으로 잘린다.
+func TestCollectorRevertReasonCapped(t *testing.T) {
+	c := NewCollector()
+	h := c.Hooks()
+	ur := common.HexToAddress("0x8876789976dEcBfCbBbe364623C63652db8C0904")
+	input := []byte{0x35, 0x93, 0x56, 0x4c, 0x01}
+	big := make([]byte, revertDataCap*2)
+	for i := range big {
+		big[i] = byte(i)
+	}
+	h.OnEnter(0, byte(vm.CALL), addrA, ur, input, 0, nil)
+	h.OnExit(0, big, 0, nil, true)
+	calls := c.DrainCalls()
+	if len(calls) != 1 || len(calls[0].RevertReason) != revertDataCap {
+		t.Fatalf("revert reason must be capped at %d: got %d", revertDataCap, len(calls[0].RevertReason))
+	}
+	if !bytes.Equal(calls[0].RevertReason, big[:revertDataCap]) {
+		t.Fatalf("capped bytes must be a prefix")
 	}
 }

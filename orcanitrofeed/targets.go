@@ -97,12 +97,20 @@ func init() {
 	// duplicates them. If wire volume matters more, delete this line — no
 	// decoder depends on it.
 	add("0xa0177CF584E06f4E7876d7bf0b2D5016e0d8a1fa", [4]byte{0x27, 0xa1, 0x09, 0x8d}) // launch(string,string,(string,string,string,uint256),uint256,bytes32)
-	// Buy entrypoints (schema v3) — 매수가 최종적으로 무조건 도달하는 프로토콜
-	// 진입점만 등록한다. 어떤 앞단(1inch·OKX·Settler·RH router·AA·multicall)을
-	// 거치든 이 진입점 frame이 자기 TARGET hit로 잡히므로 (matching is
-	// per-frame), 진입점에서만 기록하면 경로와 무관하게 체결당 정확히 한 번
-	// 세진다. 앞단 라우터를 추가로 등록하면 같은 체결이 두 곳에서 잡혀 dedup
-	// 부담만 생긴다 — 등록하지 않는다.
+	// Swap TARGETs (schema v3+) — 두 층이다.
+	//
+	// 1) 프로토콜 진입점 (UniversalRouter / SwapRouter02 / Flap Portal /
+	//    Pons v2 curve): 그 프로토콜의 공식 프론트 경로.
+	// 2) 독립 라우터 (아래 V2Router02 / RH router / OKX / Kyber / Settler):
+	//    진입점을 거치지 않고 pool·PoolManager를 **직접** 치는 것이 실측된
+	//    라우터들. 진입점 등록만으로는 이들의 스왑이 어떤 depth에서도 잡히지
+	//    않는다 (v3 smoke: fill tx의 32%가 미커버였고 전수 (to,selector)
+	//    식별로 이 목록이 나왔다).
+	//
+	// 겹침 걱정은 없다 — 독립 라우터는 정의상 진입점 frame을 만들지 않으므로
+	// 같은 체결이 두 TARGET에서 잡히지 않는다. multicall 래퍼(Relay 등)는
+	// 여전히 미등록: 안쪽 스왑 frame(예: Relay→Kyber)이 자기 TARGET hit로
+	// 잡힌다. 봇의 custom 컨트랙트는 선언 한계 개념이 없어 TARGET이 아니다.
 	//
 	// UniversalRouter는 체인 전체 스왑 라우터다 (5.5M txs vs 10k on the
 	// launcher). depth 0 hit의 Input은 ReceiptMsg.Calldata와 중복이라 순수 wire
@@ -132,6 +140,43 @@ func init() {
 	// 한다. 물량은 smoke sweep에서 계측한다.
 	addSelectorOnly([4]byte{0x59, 0xa8, 0x7b, 0xc1}) // buy(uint256,uint256,address)
 	addSelectorOnly([4]byte{0xd0, 0x4c, 0x69, 0x83}) // sell(uint256,uint256,address)
+	// UniswapV2Router02 (독립 배포, verified) — RHC V2 스왑의 주경로 (v3
+	// smoke: V2 venue fill의 95%가 SwapRouter02가 아니라 이 라우터). pair를
+	// 직접 치므로 진입점 등록으로는 안 잡힌다. swap 함수 9종 전부 — exact in
+	// 6종(FeeOnTransfer 변형 포함) + exact out 3종. addLiquidity* 계열은 스왑
+	// 선언이 아니라 제외.
+	v2Router02 := "0x89e5db8b5aa49aa85ac63f691524311aeb649eba"
+	add(v2Router02, [4]byte{0x7f, 0xf3, 0x6a, 0xb5}) // swapExactETHForTokens
+	add(v2Router02, [4]byte{0x18, 0xcb, 0xaf, 0xe5}) // swapExactTokensForETH
+	add(v2Router02, [4]byte{0x38, 0xed, 0x17, 0x39}) // swapExactTokensForTokens
+	add(v2Router02, [4]byte{0xb6, 0xf9, 0xde, 0x95}) // swapExactETHForTokensSupportingFeeOnTransferTokens
+	add(v2Router02, [4]byte{0x79, 0x1a, 0xc9, 0x47}) // swapExactTokensForETHSupportingFeeOnTransferTokens
+	add(v2Router02, [4]byte{0x5c, 0x11, 0xd7, 0x95}) // swapExactTokensForTokensSupportingFeeOnTransferTokens
+	add(v2Router02, [4]byte{0xfb, 0x3b, 0xdb, 0x41}) // swapETHForExactTokens
+	add(v2Router02, [4]byte{0x4a, 0x25, 0xd9, 0x4a}) // swapTokensForExactETH
+	add(v2Router02, [4]byte{0x88, 0x03, 0xdb, 0xee}) // swapTokensForExactTokens
+	// RH in-app router (TransparentUpgradeableProxy, impl 미검증) — 최대 소매
+	// 스왑 소스 (v3 smoke 미커버 1위: 16,403 tx / 399 ETH). V3 pool·V4
+	// PoolManager를 직접 친다 (실측 tx 0x487e389d… / 0x1b014c81…). proxy
+	// 업그레이드로 calldata 레이아웃이 바뀔 수 있다 — record는 그대로 남고
+	// Rust 디코더가 구조 게이트로 거른다.
+	add("0x65050a9b7e5075a2ba5ced7b1b64ee66262c40dc", [4]byte{0x4d, 0x81, 0x9a, 0x2a}) // swap(Step[],address,uint256,uint256,uint256)
+	// OKX DexRouter (verified) — 자체 adapter로 pool 직행. dagSwap 2종 +
+	// unxswap 2종 (선언 축은 BaseRequest/minReturn에 완비).
+	okxDexRouter := "0xe58b3089df6667fbf99b75595a1671baf6797d6d"
+	add(okxDexRouter, [4]byte{0x0c, 0x30, 0x7f, 0x76}) // dagSwapTo
+	add(okxDexRouter, [4]byte{0xf2, 0xc4, 0x26, 0x96}) // dagSwapByOrderId
+	add(okxDexRouter, [4]byte{0x08, 0x29, 0x8b, 0x5a}) // unxswapTo
+	add(okxDexRouter, [4]byte{0x98, 0x71, 0xef, 0xa4}) // unxswapByOrderId
+	// Kyber MetaAggregationRouterV2 (verified) — 자체 executor로 pool 직행.
+	// Relay(RelayApprovalProxyV3)의 multicall이 이 라우터를 내부 호출하는
+	// 것이 실측되어, 이 TARGET이 Relay 몫도 depth>0으로 잡는다.
+	add("0x6131b5fae19ea4f9d964eac0408e4408b66337b5", [4]byte{0xe2, 0x1f, 0xd0, 0xe9}) // swap(SwapExecutionParams)
+	// 0x RobinHoodSettler execute — Settler는 배포 로테이션을 한다 (2026-07
+	// 0x1d4B… → 2026-08 0x39b38686…, AllowanceHolder exec의 target). 주소
+	// 고정 TARGET은 썩으므로 selector-only. AllowanceHolder(0x…1ff3) 겉
+	// envelope은 미등록 — 안쪽 execute frame이 슬리피지 tuple까지 들고 있다.
+	addSelectorOnly([4]byte{0x1f, 0xff, 0x99, 0x1f}) // execute((address,address,uint256),bytes[],bytes32)
 }
 
 // TargetCall — allowlist 매칭 공개 래퍼 (bandpatch 등 재구성 경로용).

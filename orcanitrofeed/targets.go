@@ -177,6 +177,18 @@ func init() {
 	// 고정 TARGET은 썩으므로 selector-only. AllowanceHolder(0x…1ff3) 겉
 	// envelope은 미등록 — 안쪽 execute frame이 슬리피지 tuple까지 들고 있다.
 	addSelectorOnly([4]byte{0x1f, 0xff, 0x99, 0x1f}) // execute((address,address,uint256),bytes[],bytes32)
+	// 3라운드 (v4 smoke 잔여 실측) — 2호기·별도 배포들.
+	// verified UniversalRouter 2호기 (623 tx).
+	universalRouter2 := "0x248a454ac3584c2a48d1fcb28d3910a6b6ea00af"
+	add(universalRouter2, [4]byte{0x35, 0x93, 0x56, 0x4c}) // execute(bytes,bytes[],uint256)
+	add(universalRouter2, [4]byte{0x24, 0x85, 0x6b, 0xc3}) // execute(bytes,bytes[])
+	// RH router 동일 selector 2호기 (미검증, 1,153 tx / 27.8 ETH) — 레이아웃이
+	// 다르면 Rust 구조 게이트가 드랍한다.
+	add("0xe492912f37c2a4eca45d42dc67548f4c6cd7ce2b", [4]byte{0x4d, 0x81, 0x9a, 0x2a})
+	// 1inch AggregationRouterV6 — canonical + verified 별도 배포 (477 tx).
+	// unoswap 계열은 output 레그 복원 불가라 미등록.
+	add("0x111111125421ca6dc452d289314280a0f8842a65", [4]byte{0x07, 0xed, 0x23, 0x79}) // swap(address,SwapDescription,bytes)
+	add("0x5a705de8982235a7fa45bb83dcacf03a211389c7", [4]byte{0x07, 0xed, 0x23, 0x79})
 }
 
 // TargetCall — allowlist 매칭 공개 래퍼 (bandpatch 등 재구성 경로용).

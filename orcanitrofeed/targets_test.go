@@ -46,6 +46,9 @@ func TestStandaloneRouterTargets(t *testing.T) {
 		{"okx dagSwapTo", common.HexToAddress("0xe58b3089df6667fbf99b75595a1671baf6797d6d"), []byte{0x0c, 0x30, 0x7f, 0x76}},
 		{"okx unxswapByOrderId", common.HexToAddress("0xe58b3089df6667fbf99b75595a1671baf6797d6d"), []byte{0x98, 0x71, 0xef, 0xa4}},
 		{"kyber swap", common.HexToAddress("0x6131b5fae19ea4f9d964eac0408e4408b66337b5"), []byte{0xe2, 0x1f, 0xd0, 0xe9}},
+		{"universal router 2 execute", common.HexToAddress("0x248a454ac3584c2a48d1fcb28d3910a6b6ea00af"), []byte{0x35, 0x93, 0x56, 0x4c}},
+		{"rh router 2 swap", common.HexToAddress("0xe492912f37c2a4eca45d42dc67548f4c6cd7ce2b"), []byte{0x4d, 0x81, 0x9a, 0x2a}},
+		{"oneinch v6 swap", common.HexToAddress("0x5a705de8982235a7fa45bb83dcacf03a211389c7"), []byte{0x07, 0xed, 0x23, 0x79}},
 	}
 	for _, c := range cases {
 		input := append(append([]byte{}, c.sel...), 0x00)

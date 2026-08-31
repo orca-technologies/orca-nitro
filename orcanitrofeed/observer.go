@@ -36,7 +36,7 @@ type BlockObserver struct {
 	codeCache map[common.Address]uint8
 
 	// block 모드: seal까지 버퍼링
-	pendingMsgs []*ReceiptMsg
+	pendingMsgs []*OrcaNitroReceipt
 }
 
 func NewBlockObserver(sink Sink, mode string, lookback uint64, headerTime HeaderTimeFunc) *BlockObserver {
@@ -71,7 +71,7 @@ func (o *BlockObserver) EVMHooks() *tracing.Hooks {
 // OnTxAccepted — tx가 블록에 확정 수록된 직후 (receipts append 직후) 호출.
 // internal tx(ArbitrumInternalTxType)는 호출자가 걸러서 호출하지 않는다.
 func (o *BlockObserver) OnTxAccepted(tx *types.Transaction, sender common.Address, receipt *types.Receipt, statedb *state.StateDB, txIndex int) {
-	msg := o.buildReceiptMsg(tx, sender, receipt, statedb, txIndex)
+	msg := o.buildOrcaNitroReceipt(tx, sender, receipt, statedb, txIndex)
 	o.dispatchedReceipts++
 	if o.mode == "tx" {
 		o.sink.Enqueue(MsgReceipt, msg)
@@ -107,7 +107,7 @@ func (o *BlockObserver) OnAppendFailed(blockNumber uint64) {
 	o.sink.Enqueue(MsgInvalidation, &InvalidationMsg{Seq: 0, BlockNumber: blockNumber})
 }
 
-func (o *BlockObserver) buildReceiptMsg(tx *types.Transaction, sender common.Address, receipt *types.Receipt, statedb *state.StateDB, txIndex int) *ReceiptMsg {
+func (o *BlockObserver) buildOrcaNitroReceipt(tx *types.Transaction, sender common.Address, receipt *types.Receipt, statedb *state.StateDB, txIndex int) *OrcaNitroReceipt {
 	var transfers []TransferRecord
 	if recs := o.collector.Drain(); len(recs) > 0 {
 		transfers = make([]TransferRecord, len(recs))
@@ -124,17 +124,17 @@ func (o *BlockObserver) buildReceiptMsg(tx *types.Transaction, sender common.Add
 		copy(calls, cs)
 	}
 	revertOutput := o.collector.DrainRevertOutput()
-	return NewReceiptMsg(o.blockNumber, o.l2Timestamp, o.l1BlockNumber, o.sameTimestampIndex, txIndex, tx, sender, receipt, transfers, logs, calls, revertOutput,
+	return NewOrcaNitroReceipt(o.blockNumber, o.l2Timestamp, o.l1BlockNumber, o.sameTimestampIndex, txIndex, tx, sender, receipt, transfers, logs, calls, revertOutput,
 		func(addr common.Address) uint8 { return accountKindCached(statedb, o.codeCache, addr) })
 }
 
-// NewReceiptMsg — live(BlockObserver)·sweep(SweepObserver) 공용 메시지 조립.
+// NewOrcaNitroReceipt — live(BlockObserver)·sweep(SweepObserver) 공용 메시지 조립.
 // transfers/calls/revertOutput은 호출자가 소유권을 넘긴 슬라이스여야 한다 (재사용 버퍼 금지).
-func NewReceiptMsg(blockNumber, l2Timestamp, l1BlockNumber uint64, sameTimestampIndex uint32, txIndex int, tx *types.Transaction, sender common.Address, receipt *types.Receipt, transfers []TransferRecord, logs []LogRecord, calls []WhitelistedCallRecord, revertOutput []byte, accountKind func(common.Address) uint8) *ReceiptMsg {
+func NewOrcaNitroReceipt(blockNumber, l2Timestamp, l1BlockNumber uint64, sameTimestampIndex uint32, txIndex int, tx *types.Transaction, sender common.Address, receipt *types.Receipt, transfers []TransferRecord, logs []LogRecord, calls []WhitelistedCallRecord, revertOutput []byte, accountKind func(common.Address) uint8) *OrcaNitroReceipt {
 	// PERF:ALLOC
 	//   cost: mem=O(1)·struct + O(N_logs+N_transfers+N_calls) 슬라이스/tx, N~1e0..1e2 → N 불확실
 	//   note: msg는 writer가 비동기 직렬화하므로 tx-scope 버퍼 재사용 불가
-	msg := &ReceiptMsg{
+	msg := &OrcaNitroReceipt{
 		Seq:         0,
 		BlockNumber: blockNumber,
 		// #nosec G115

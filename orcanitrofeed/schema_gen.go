@@ -658,7 +658,7 @@ func (z RangeDoneMsg) Msgsize() (s int) {
 }
 
 // DecodeMsg implements msgp.Decodable
-func (z *ReceiptMsg) DecodeMsg(dc *msgp.Reader) (err error) {
+func (z *OrcaNitroReceipt) DecodeMsg(dc *msgp.Reader) (err error) {
 	var zb0001 uint32
 	zb0001, err = dc.ReadArrayHeader()
 	if err != nil {
@@ -842,7 +842,7 @@ func (z *ReceiptMsg) DecodeMsg(dc *msgp.Reader) (err error) {
 }
 
 // EncodeMsg implements msgp.Encodable
-func (z *ReceiptMsg) EncodeMsg(en *msgp.Writer) (err error) {
+func (z *OrcaNitroReceipt) EncodeMsg(en *msgp.Writer) (err error) {
 	// array header, size 26
 	err = en.Append(0xdc, 0x0, 0x1a)
 	if err != nil {
@@ -1003,7 +1003,7 @@ func (z *ReceiptMsg) EncodeMsg(en *msgp.Writer) (err error) {
 }
 
 // MarshalMsg implements msgp.Marshaler
-func (z *ReceiptMsg) MarshalMsg(b []byte) (o []byte, err error) {
+func (z *OrcaNitroReceipt) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.Require(b, z.Msgsize())
 	// array header, size 26
 	o = append(o, 0xdc, 0x0, 0x1a)
@@ -1058,7 +1058,7 @@ func (z *ReceiptMsg) MarshalMsg(b []byte) (o []byte, err error) {
 }
 
 // UnmarshalMsg implements msgp.Unmarshaler
-func (z *ReceiptMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
+func (z *OrcaNitroReceipt) UnmarshalMsg(bts []byte) (o []byte, err error) {
 	var zb0001 uint32
 	zb0001, bts, err = msgp.ReadArrayHeaderBytes(bts)
 	if err != nil {
@@ -1243,7 +1243,7 @@ func (z *ReceiptMsg) UnmarshalMsg(bts []byte) (o []byte, err error) {
 }
 
 // Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
-func (z *ReceiptMsg) Msgsize() (s int) {
+func (z *OrcaNitroReceipt) Msgsize() (s int) {
 	s = 3 + msgp.Uint64Size + msgp.Uint64Size + msgp.Uint32Size + msgp.Uint64Size + msgp.Uint8Size + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.Uint8Size + msgp.Uint8Size + msgp.ArrayHeaderSize + (20 * (msgp.ByteSize)) + msgp.Uint64Size + msgp.Uint64Size + msgp.BytesPrefixSize + len(z.EffectiveGasPrice) + msgp.BytesPrefixSize + len(z.Value) + msgp.BytesPrefixSize + len(z.Calldata) + msgp.Uint64Size + msgp.Uint64Size + msgp.Uint64Size + msgp.Uint64Size + msgp.Uint64Size + msgp.ArrayHeaderSize
 	for za0004 := range z.Logs {
 		s += z.Logs[za0004].Msgsize()

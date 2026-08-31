@@ -256,7 +256,7 @@ func (c *Collector) onExit(_ int, output []byte, _ uint64, _ error, reverted boo
 		if frame.selfCallIdx >= 0 {
 			c.calls[frame.selfCallIdx].RevertReason = CapRevertData(output)
 		}
-		// 최상위 frame revert = tx 실패 — ReceiptMsg.RevertOutput.
+		// 최상위 frame revert = tx 실패 — OrcaNitroReceipt.RevertOutput.
 		if len(c.frames) == 0 {
 			c.revertOutput = CapRevertData(output)
 		}

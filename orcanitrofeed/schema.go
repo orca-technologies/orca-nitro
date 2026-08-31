@@ -10,7 +10,7 @@ package orcanitrofeed
 // 묶는 bump — v1 컨슈머(라이브 feeder)가 배포돼 있으므로 dispatch 출력이 바뀌는
 // 변경은 여기서부터 버전으로 가른다. feed 풀도 schema 버전별로 분리된다
 // (orca-docs skills/rhc-backtest §schema 풀).
-// v3: WhitelistedCallRecord.RevertReason + ReceiptMsg.RevertOutput + 매수
+// v3: WhitelistedCallRecord.RevertReason + OrcaNitroReceipt.RevertOutput + 매수
 // 진입점 TARGET(UniversalRouter·SwapRouter02·Flap swapExactInput)을 묶는 bump.
 // v4: WhitelistedCallRecord.ExitInnerIndex — frame exit 시점의 inner 시퀀스
 // (exclusive 상한). fill/log의 Call 프레임 귀속을 exact 구간 포함으로 만든다.
@@ -21,7 +21,7 @@ type MsgType byte
 
 const (
 	MsgHello        MsgType = 1 // Hello
-	MsgReceipt      MsgType = 2 // ReceiptMsg
+	MsgReceipt      MsgType = 2 // OrcaNitroReceipt
 	MsgBlockSeal    MsgType = 3 // BlockSealMsg — tx 모드 블록 경계·tx_count
 	MsgInvalidation MsgType = 4 // InvalidationMsg — block commit 실패 통지
 	MsgRangeDone    MsgType = 5 // RangeDoneMsg — sweep chunk 완료 마커
@@ -91,8 +91,8 @@ type WhitelistedCallRecord struct {
 	ExitInnerIndex uint16
 }
 
-//msgp:tuple ReceiptMsg
-type ReceiptMsg struct {
+//msgp:tuple OrcaNitroReceipt
+type OrcaNitroReceipt struct {
 	Seq               uint64
 	BlockNumber       uint64
 	TxIndex           uint32
@@ -137,11 +137,11 @@ type BlockSealMsg struct {
 	BlockNumber uint64
 	// 블록에 최종 포함된 tx 수 (internal tx 포함).
 	TxCount uint32
-	// 같은 L2Timestamp 연속 블록 안 0-based index (ReceiptMsg와 동일).
+	// 같은 L2Timestamp 연속 블록 안 0-based index (OrcaNitroReceipt와 동일).
 	SameTimestampIndex uint32
-	// 이번 블록에서 dispatch한 ReceiptMsg 수 (internal 제외).
+	// 이번 블록에서 dispatch한 OrcaNitroReceipt 수 (internal 제외).
 	ReceiptCount uint32
-	// 이 L2 블록이 시퀀싱된 L1 block number (ReceiptMsg와 동일 소스).
+	// 이 L2 블록이 시퀀싱된 L1 block number (OrcaNitroReceipt와 동일 소스).
 	L1BlockNumber uint64
 	// L2 header unix sec — seal 자체가 시각을 나른다. receipt가 없는 블록
 	// (internal tx만)도 올바른 시간 버킷에 들어가야 한다.

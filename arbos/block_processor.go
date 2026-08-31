@@ -26,6 +26,7 @@ import (
 	"github.com/offchainlabs/nitro/arbos/l1pricing"
 	"github.com/offchainlabs/nitro/arbos/l2pricing"
 	"github.com/offchainlabs/nitro/arbos/util"
+	"github.com/offchainlabs/nitro/orcanitrofeed"
 	"github.com/offchainlabs/nitro/util/arbmath"
 )
 
@@ -300,6 +301,7 @@ func ProduceBlock(
 	isMsgForPrefetch bool,
 	runCtx *core.MessageRunContext,
 	exposeMultiGas bool,
+	observer *orcanitrofeed.BlockObserver,
 ) (*types.Block, *state.StateDB, types.Receipts, error) {
 	chainConfig := chainContext.Config()
 	lastArbosVersion := types.DeserializeHeaderExtraInformation(lastBlockHeader).ArbOSFormatVersion
@@ -311,7 +313,7 @@ func ProduceBlock(
 	hooks := NewNoopSequencingHooks(txes)
 
 	return ProduceBlockAdvanced(
-		message.Header, delayedMessagesRead, lastBlockHeader, statedb, chainContext, hooks, isMsgForPrefetch, runCtx, exposeMultiGas, nil,
+		message.Header, delayedMessagesRead, lastBlockHeader, statedb, chainContext, hooks, isMsgForPrefetch, runCtx, exposeMultiGas, nil, observer,
 	)
 }
 
@@ -327,6 +329,7 @@ func ProduceBlockAdvanced(
 	runCtx *core.MessageRunContext,
 	exposeMultiGas bool,
 	addressChecker state.AddressChecker,
+	observer *orcanitrofeed.BlockObserver,
 ) (*types.Block, *state.StateDB, types.Receipts, error) {
 
 	arbState, err := arbosState.OpenSystemArbosState(statedb, nil, false)
@@ -359,6 +362,9 @@ func ProduceBlockAdvanced(
 	}
 
 	header := createNewHeader(lastBlockHeader, l1Info, baseFee, chainConfig)
+	if observer != nil {
+		observer.BeginBlock(header.Number.Uint64(), header.Time, l1Info.l1BlockNumber)
+	}
 	// Note: blockGasLeft will diverge from the actual gas left during execution in the event of invalid txs,
 	// but it's only used as block-local representation limiting the amount of work done in a block.
 	blockGasLeft, _ := arbState.L2PricingState().PerBlockGasLimit()
@@ -518,7 +524,15 @@ func ProduceBlockAdvanced(
 
 			gasPool := gethGas
 			blockContext := core.NewEVMBlockContext(header, chainContext, &header.Coinbase)
-			evm := vm.NewEVM(blockContext, buildState.statedb, chainConfig, vm.Config{ExposeMultiGas: exposeMultiGas})
+			vmConfig := vm.Config{ExposeMultiGas: exposeMultiGas}
+			var evmStateDB vm.StateDB = buildState.statedb
+			if observer != nil {
+				// OnBalanceChange는 hooked 래퍼를 거칠 때만 발화한다
+				// (upstream 패턴: core/state_processor.go Process)
+				vmConfig.Tracer = observer.EVMHooks()
+				evmStateDB = state.NewHookedState(buildState.statedb, observer.EVMHooks())
+			}
+			evm := vm.NewEVM(blockContext, evmStateDB, chainConfig, vmConfig)
 			receipt, result, err := core.ApplyTransactionWithResultFilter(
 				evm,
 				&gasPool,
@@ -689,6 +703,10 @@ func ProduceBlockAdvanced(
 		buildState.complete = append(buildState.complete, tx)
 		buildState.receipts = append(buildState.receipts, receipt)
 
+		if observer != nil && tx.Type() != types.ArbitrumInternalTxType {
+			observer.OnTxAccepted(tx, sender, receipt, buildState.statedb, len(buildState.receipts)-1)
+		}
+
 		if isUserTx {
 			if buildState.activeGroupCP == nil {
 				sequencingHooks.TxSucceeded()
@@ -737,6 +755,10 @@ func ProduceBlockAdvanced(
 		}
 		// This is a real chain and funds were burnt, not minted, so only log an error and don't panic
 		log.Error("Unexpected total balance delta", "delta", balanceDelta, "expected", buildState.expectedBalanceDelta)
+	}
+
+	if observer != nil {
+		observer.OnBlockSealed(block)
 	}
 
 	return block, buildState.statedb, buildState.receipts, nil

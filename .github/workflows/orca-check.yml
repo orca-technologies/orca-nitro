@@ -1,0 +1,32 @@
+name: orca-check
+
+on:
+  pull_request:
+    branches: ["orca/main"]
+  push:
+    branches: ["orca/main"]
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.5"
+          cache: true
+
+      # orca-nitro-feed는 geth 타입에 의존하므로 go-ethereum submodule만 필요 (cgo 없음)
+      - name: checkout go-ethereum submodule
+        run: git submodule update --init go-ethereum
+
+      - name: vet
+        run: go vet ./orcanitrofeed/...
+
+      - name: test
+        run: go test ./orcanitrofeed/... -race
+
+      # 전체 go build는 solgen·arbitrator 헤더(cgo) 요구로 풀 빌드에서만 수행 (orca-build.yml)

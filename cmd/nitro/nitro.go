@@ -54,6 +54,8 @@ import (
 	"github.com/offchainlabs/nitro/execution/gethexec"
 	_ "github.com/offchainlabs/nitro/execution/nodeinterface"
 	"github.com/offchainlabs/nitro/execution_consensus"
+	"github.com/offchainlabs/nitro/orcanitrofeed"
+	"github.com/offchainlabs/nitro/orcanitrofeed/orcasock"
 	"github.com/offchainlabs/nitro/solgen/go/bridgegen"
 	"github.com/offchainlabs/nitro/solgen/go/precompilesgen"
 	"github.com/offchainlabs/nitro/solgen/go/rollupgen"
@@ -480,6 +482,18 @@ func mainImpl() int {
 		if err != nil {
 			log.Error("error initializing blocksReExecutor", "err", err)
 			return 1
+		}
+
+		// orca sweep dispatch: 재실행 블록의 receipt·transfer를 unix socket으로 전달
+		if nodeConfig.Execution.OrcaNitroFeed.Enable {
+			sweepDispatcher, err := orcasock.NewDispatcher(&nodeConfig.Execution.OrcaNitroFeed, orcanitrofeed.ModeSweep)
+			if err != nil {
+				log.Error("error initializing orca sweep dispatcher", "err", err)
+				return 1
+			}
+			blocksReExecutor.SetOrcaSink(sweepDispatcher, nodeConfig.Execution.OrcaNitroFeed.SameTimestampLookback)
+			// Close는 ring 잔량 flush를 기다린다 — 재실행 완료 후 반드시 호출
+			deferFuncs = append(deferFuncs, sweepDispatcher.Close)
 		}
 
 		blocksReExecutor.Start(ctx)

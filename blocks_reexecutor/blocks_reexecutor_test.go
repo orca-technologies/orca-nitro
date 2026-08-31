@@ -108,6 +108,8 @@ func newTestConfig() *Config {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 }
@@ -126,7 +128,7 @@ func TestAdvanceStateUpToBlockCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := s.advanceStateUpToBlock(ctx, nil, targetHeader, lastAvailableHeader, release)
+	err := s.advanceStateUpToBlock(ctx, nil, targetHeader, lastAvailableHeader, release, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got: %v", err)
 	}
@@ -146,7 +148,7 @@ func TestAdvanceStateUpToBlockRecoversPanic(t *testing.T) {
 	released := false
 	release := func() { released = true }
 
-	err := s.advanceStateUpToBlock(context.Background(), nil, targetHeader, lastAvailableHeader, release)
+	err := s.advanceStateUpToBlock(context.Background(), nil, targetHeader, lastAvailableHeader, release, nil)
 	if err == nil {
 		t.Fatal("expected error from panic recovery, got nil")
 	}
@@ -232,6 +234,8 @@ func TestValidateValidFullConfig(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	if err := c.Validate(); err != nil {
@@ -255,6 +259,8 @@ func TestValidateValidRandomConfig(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	if err := c.Validate(); err != nil {
@@ -275,6 +281,8 @@ func TestValidateModeCaseInsensitive(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	if err := c.Validate(); err != nil {
@@ -295,6 +303,8 @@ func TestValidateInvalidMode(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	err := c.Validate()
@@ -316,6 +326,8 @@ func TestValidateEmptyBlocks(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	err := c.Validate()
@@ -337,6 +349,8 @@ func TestValidateMalformedBlocksJSON(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	err := c.Validate()
@@ -358,6 +372,8 @@ func TestValidateInvalidBlockRange(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	err := c.Validate()
@@ -379,6 +395,8 @@ func TestValidateRoomZero(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	err := c.Validate()
@@ -400,6 +418,8 @@ func TestValidateRoomNegative(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	err := c.Validate()
@@ -422,6 +442,8 @@ func TestValidateDisabledSkipsModeCheck(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	if err := c.Validate(); err != nil {
@@ -439,6 +461,8 @@ func TestValidateMultipleBlockRanges(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	if err := c.Validate(); err != nil {
@@ -459,6 +483,8 @@ func TestValidateSecondRangeInvalid(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	err := c.Validate()
@@ -482,6 +508,8 @@ func TestImplReturnsZeroWhenFatalPreSet(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	s.done = make(chan struct{}, 2)
@@ -507,6 +535,8 @@ func TestImplReturnsStartBlockWhenNoWork(t *testing.T) {
 		MinBlocksPerThread: 0,
 		TrieCleanLimit:     0,
 		ValidateMultiGas:   false,
+		SkipOnMismatch:     false,
+		MismatchReport:     "",
 		blocks:             nil,
 	}
 	s.done = make(chan struct{}, 2)
@@ -514,6 +544,89 @@ func TestImplReturnsStartBlockWhenNoWork(t *testing.T) {
 	result := s.Impl(context.Background(), 100, 100, 10)
 	if result != 100 {
 		t.Fatalf("expected 100 when startBlock == currentBlock, got: %d", result)
+	}
+}
+
+func TestImplAscendingCoversRangeInOrder(t *testing.T) {
+	s := newTestReExecutor(nil)
+	s.config = newTestConfig()
+	s.config.Room = 3
+	s.done = make(chan struct{}, 3)
+
+	var chunks [][2]uint64
+	s.implAscending(context.Background(), 0, 95, 10, func(lo, hi uint64) {
+		chunks = append(chunks, [2]uint64{lo, hi})
+		s.done <- struct{}{}
+	})
+
+	expected := [][2]uint64{
+		{0, 10}, {10, 20}, {20, 30}, {30, 40}, {40, 50},
+		{50, 60}, {60, 70}, {70, 80}, {80, 90}, {90, 95},
+	}
+	if len(chunks) != len(expected) {
+		t.Fatalf("expected %d chunks, got %d: %v", len(expected), len(chunks), chunks)
+	}
+	for i, c := range chunks {
+		if c != expected[i] {
+			t.Fatalf("chunk %d: expected %v, got %v (all: %v)", i, expected[i], c, chunks)
+		}
+	}
+}
+
+func TestImplAscendingSingleChunkWhenRangeSmall(t *testing.T) {
+	s := newTestReExecutor(nil)
+	s.config = newTestConfig()
+	s.config.Room = 4
+	s.done = make(chan struct{}, 4)
+
+	var chunks [][2]uint64
+	s.implAscending(context.Background(), 5, 12, 1000, func(lo, hi uint64) {
+		chunks = append(chunks, [2]uint64{lo, hi})
+		s.done <- struct{}{}
+	})
+
+	if len(chunks) != 1 || chunks[0] != [2]uint64{5, 12} {
+		t.Fatalf("expected single chunk (5,12], got: %v", chunks)
+	}
+}
+
+func TestImplAscendingStopsRefillOnFatal(t *testing.T) {
+	s := newTestReExecutor(make(chan error, 1))
+	s.config = newTestConfig()
+	s.config.Room = 1
+	s.done = make(chan struct{}, 1)
+
+	launches := 0
+	s.implAscending(context.Background(), 0, 100, 10, func(lo, hi uint64) {
+		launches++
+		if launches == 2 {
+			s.fatalReported.Store(true)
+		}
+		s.done <- struct{}{}
+	})
+
+	if launches != 2 {
+		t.Fatalf("expected exactly 2 launches before fatal stop, got: %d", launches)
+	}
+}
+
+func TestImplAscendingCancelledContextLaunchesNothing(t *testing.T) {
+	s := newTestReExecutor(nil)
+	s.config = newTestConfig()
+	s.config.Room = 2
+	s.done = make(chan struct{}, 2)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	launches := 0
+	s.implAscending(ctx, 0, 100, 10, func(lo, hi uint64) {
+		launches++
+		s.done <- struct{}{}
+	})
+
+	if launches != 0 {
+		t.Fatalf("expected no launches with cancelled context, got: %d", launches)
 	}
 }
 

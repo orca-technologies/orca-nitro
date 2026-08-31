@@ -1,0 +1,88 @@
+name: orca-build
+
+# orca-v* 태그 push → ubuntu 풀 빌드 → GitHub Release asset (nitro 바이너리 + sha256).
+# 레시피는 dora-master `orca-host rhc build-nitro` (Ubuntu 24.04 빌더, 2026-07-27 실측)와 동일.
+on:
+  push:
+    tags: ["orca-v*"]
+
+env:
+  GO_VERSION: "1.25.5"
+  CBINDGEN_VERSION: "0.29.2"
+  FOUNDRY_VERSION: "1.2.3"
+  EMSDK_REPO_TAG: "3.1.46"
+  EMSDK_VERSION: "3.1.7"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # release asset 업로드
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: apt deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q git curl build-essential cmake pkg-config python3 \
+            wabt bison zlib1g-dev llvm-dev libclang-dev clang lbzip2 xz-utils unzip
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install -g yarn
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: cache cargo + emsdk
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cbindgen
+            ~/emsdk
+          key: orca-build-${{ runner.os }}-${{ env.CBINDGEN_VERSION }}-${{ env.EMSDK_VERSION }}
+
+      - name: cbindgen
+        run: command -v cbindgen || cargo install --force cbindgen --version ${{ env.CBINDGEN_VERSION }}
+
+      - name: foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v${{ env.FOUNDRY_VERSION }}
+
+      - name: emsdk
+        run: |
+          if [ ! -d "$HOME/emsdk" ]; then
+            git clone --depth 1 --branch ${{ env.EMSDK_REPO_TAG }} https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
+          fi
+          "$HOME/emsdk/emsdk" install ${{ env.EMSDK_VERSION }}
+          "$HOME/emsdk/emsdk" activate ${{ env.EMSDK_VERSION }}
+
+      - name: make nitro
+        run: |
+          source "$HOME/emsdk/emsdk_env.sh"
+          make CBROTLI_WASM_BUILD_ARGS="" NITRO_VERSION="${{ github.ref_name }}" target/bin/nitro
+          ./target/bin/nitro --version || true
+
+      - name: sha256
+        run: |
+          cp target/bin/nitro "nitro-${{ github.ref_name }}"
+          sha256sum "nitro-${{ github.ref_name }}" | tee "nitro-${{ github.ref_name }}.sha256"
+
+      - name: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --notes "orca-nitro ubuntu 24.04 (x86_64) build — base: v3.11.2" \
+            "nitro-${{ github.ref_name }}" "nitro-${{ github.ref_name }}.sha256"

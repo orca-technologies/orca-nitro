@@ -12,7 +12,7 @@ import (
 //
 // 실행 흐름: geth Process가 tx마다 OnTxStart/OnTxEnd를 발화 → OnTxEnd 콜백에서
 // (tx, sender, transfers)를 블록 로컬로 축적 → 블록 실행 완료 시 OnBlockExecuted가
-// receipts와 짝지어 ReceiptMsg를 조립·dispatch한다 (out-of-order 허용).
+// receipts와 짝지어 OrcaNitroReceipt를 조립·dispatch한다 (out-of-order 허용).
 type SweepObserver struct {
 	sink      Sink
 	collector *Collector
@@ -93,7 +93,7 @@ func (o *SweepObserver) OnBlockExecuted(block *types.Block, receipts types.Recei
 			logs = cp.logs
 			calls = cp.calls
 		}
-		msg := NewReceiptMsg(blockNumber, block.Time(), l1BlockNumber, index, i, tx, sender, receipts[i], transfers, logs, calls,
+		msg := NewOrcaNitroReceipt(blockNumber, block.Time(), l1BlockNumber, index, i, tx, sender, receipts[i], transfers, logs, calls,
 			func(addr common.Address) uint8 { return accountKindCached(statedb, codeCache, addr) })
 		o.sink.Enqueue(MsgReceipt, msg)
 		receiptCount++

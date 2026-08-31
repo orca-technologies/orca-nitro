@@ -9,7 +9,7 @@ type SeqSetter interface {
 	SetSeq(uint64)
 }
 
-func (m *ReceiptMsg) SetSeq(s uint64)      { m.Seq = s }
+func (m *OrcaNitroReceipt) SetSeq(s uint64)      { m.Seq = s }
 func (m *BlockSealMsg) SetSeq(s uint64)    { m.Seq = s }
 func (m *InvalidationMsg) SetSeq(s uint64) { m.Seq = s }
 func (m *RangeDoneMsg) SetSeq(s uint64)    { m.Seq = s }

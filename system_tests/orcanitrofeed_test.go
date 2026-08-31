@@ -36,7 +36,7 @@ type receiptKey struct {
 type orcaMsgStore struct {
 	mu       sync.Mutex
 	hello    *orcanitrofeed.Hello
-	receipts map[receiptKey]*orcanitrofeed.ReceiptMsg
+	receipts map[receiptKey]*orcanitrofeed.OrcaNitroReceipt
 	seals    map[uint64]*orcanitrofeed.BlockSealMsg
 	ranges   []*orcanitrofeed.RangeDoneMsg
 	seqs     []uint64
@@ -46,7 +46,7 @@ func newOrcaMsgStore() *orcaMsgStore {
 	return &orcaMsgStore{
 		mu:       sync.Mutex{},
 		hello:    nil,
-		receipts: make(map[receiptKey]*orcanitrofeed.ReceiptMsg),
+		receipts: make(map[receiptKey]*orcanitrofeed.OrcaNitroReceipt),
 		seals:    make(map[uint64]*orcanitrofeed.BlockSealMsg),
 		ranges:   nil,
 		seqs:     nil,
@@ -57,7 +57,7 @@ func (s *orcaMsgStore) Enqueue(typ orcanitrofeed.MsgType, msg orcanitrofeed.SeqS
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch m := msg.(type) {
-	case *orcanitrofeed.ReceiptMsg:
+	case *orcanitrofeed.OrcaNitroReceipt:
 		s.receipts[receiptKey{m.BlockNumber, m.TxIndex}] = m
 	case *orcanitrofeed.BlockSealMsg:
 		s.seals[m.BlockNumber] = m
@@ -66,13 +66,13 @@ func (s *orcaMsgStore) Enqueue(typ orcanitrofeed.MsgType, msg orcanitrofeed.SeqS
 	}
 }
 
-func (s *orcaMsgStore) receipt(blockNumber uint64, txIndex uint32) *orcanitrofeed.ReceiptMsg {
+func (s *orcaMsgStore) receipt(blockNumber uint64, txIndex uint32) *orcanitrofeed.OrcaNitroReceipt {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.receipts[receiptKey{blockNumber, txIndex}]
 }
 
-func (s *orcaMsgStore) waitReceipt(t *testing.T, blockNumber uint64, txIndex uint32) *orcanitrofeed.ReceiptMsg {
+func (s *orcaMsgStore) waitReceipt(t *testing.T, blockNumber uint64, txIndex uint32) *orcanitrofeed.OrcaNitroReceipt {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
@@ -104,7 +104,7 @@ func (s *orcaMsgStore) readSocket(t *testing.T, conn net.Conn) {
 				s.hello = &m
 			}
 		case orcanitrofeed.MsgReceipt:
-			var m orcanitrofeed.ReceiptMsg
+			var m orcanitrofeed.OrcaNitroReceipt
 			if _, err := m.UnmarshalMsg(payload); err == nil {
 				s.receipts[receiptKey{m.BlockNumber, m.TxIndex}] = &m
 				s.seqs = append(s.seqs, m.Seq)

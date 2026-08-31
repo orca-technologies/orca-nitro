@@ -19,7 +19,7 @@ func goldenMessages() map[string]msgp.Marshaler {
 	hash := func(b byte) (h [32]byte) { h[0], h[31] = b, b; return }
 	return map[string]msgp.Marshaler{
 		"hello": &Hello{SchemaVersion: SchemaVersion, Mode: ModeLiveTx},
-		"receipt": &ReceiptMsg{
+		"receipt": &OrcaNitroReceipt{
 			Seq: 7, BlockNumber: 123456, TxIndex: 2,
 			L2Timestamp: 1753689600, TxType: 2,
 			From: addr(0x01), To: addr(0x02),

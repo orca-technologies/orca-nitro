@@ -75,14 +75,14 @@ func TestDispatcherHelloAndRoundtrip(t *testing.T) {
 		t.Fatalf("hello 불일치: %+v", hello)
 	}
 
-	sent := &orcanitrofeed.ReceiptMsg{BlockNumber: 42, TxIndex: 1, Status: 1}
+	sent := &orcanitrofeed.OrcaNitroReceipt{BlockNumber: 42, TxIndex: 1, Status: 1}
 	d.Enqueue(orcanitrofeed.MsgReceipt, sent)
 
 	typ, payload = readFrame(t, conn)
 	if typ != orcanitrofeed.MsgReceipt {
 		t.Fatalf("receipt 프레임 아님: %d", typ)
 	}
-	var got orcanitrofeed.ReceiptMsg
+	var got orcanitrofeed.OrcaNitroReceipt
 	if _, err := got.UnmarshalMsg(payload); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestDispatcherSweepModeLossless(t *testing.T) {
 	enqDone := make(chan struct{})
 	go func() {
 		for i := 0; i < total; i++ {
-			d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.ReceiptMsg{BlockNumber: uint64(i)})
+			d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.OrcaNitroReceipt{BlockNumber: uint64(i)})
 		}
 		close(enqDone)
 	}()
@@ -150,7 +150,7 @@ func TestDispatcherSweepModeLossless(t *testing.T) {
 		if typ != orcanitrofeed.MsgReceipt {
 			t.Fatalf("receipt 아님: %d", typ)
 		}
-		var got orcanitrofeed.ReceiptMsg
+		var got orcanitrofeed.OrcaNitroReceipt
 		if _, err := got.UnmarshalMsg(payload); err != nil {
 			t.Fatal(err)
 		}
@@ -174,7 +174,7 @@ func TestDispatcherEnqueueWithoutClientDoesNotBlock(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < 1000; i++ {
-			d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.ReceiptMsg{BlockNumber: uint64(i)})
+			d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.OrcaNitroReceipt{BlockNumber: uint64(i)})
 		}
 		close(done)
 	}()
@@ -218,7 +218,7 @@ func TestDispatcherRetentionReplay(t *testing.T) {
 	d, sock := newTestDispatcher(t, 4096)
 
 	for i := 0; i < 100; i++ {
-		d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.ReceiptMsg{BlockNumber: uint64(i)})
+		d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.OrcaNitroReceipt{BlockNumber: uint64(i)})
 	}
 	time.Sleep(200 * time.Millisecond) // writer가 staging → retention 옮길 시간
 
@@ -236,7 +236,7 @@ func TestDispatcherRetentionReplay(t *testing.T) {
 		if typ != orcanitrofeed.MsgReceipt {
 			t.Fatalf("receipt 아님: %d", typ)
 		}
-		var m orcanitrofeed.ReceiptMsg
+		var m orcanitrofeed.OrcaNitroReceipt
 		if _, err := m.UnmarshalMsg(payload); err != nil {
 			t.Fatal(err)
 		}
@@ -246,9 +246,9 @@ func TestDispatcherRetentionReplay(t *testing.T) {
 	}
 
 	// 이후 live 이어붙임
-	d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.ReceiptMsg{BlockNumber: 100})
+	d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.OrcaNitroReceipt{BlockNumber: 100})
 	_, payload := readFrame(t, conn)
-	var m orcanitrofeed.ReceiptMsg
+	var m orcanitrofeed.OrcaNitroReceipt
 	if _, err := m.UnmarshalMsg(payload); err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestDispatcherByteBudgetEviction(t *testing.T) {
 
 	payload := make([]byte, 200)
 	for i := 0; i < 200; i++ {
-		d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.ReceiptMsg{BlockNumber: uint64(i), Calldata: payload})
+		d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.OrcaNitroReceipt{BlockNumber: uint64(i), Calldata: payload})
 	}
 	time.Sleep(300 * time.Millisecond)
 
@@ -288,7 +288,7 @@ func TestDispatcherByteBudgetEviction(t *testing.T) {
 		t.Fatalf("hello 먼저: %d", typ)
 	}
 	_, p := readFrame(t, conn)
-	var first orcanitrofeed.ReceiptMsg
+	var first orcanitrofeed.OrcaNitroReceipt
 	if _, err := first.UnmarshalMsg(p); err != nil {
 		t.Fatal(err)
 	}
@@ -334,12 +334,12 @@ func TestDispatcherAgeEviction(t *testing.T) {
 	t.Cleanup(d.Close)
 
 	for i := 0; i < 10; i++ {
-		d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.ReceiptMsg{BlockNumber: uint64(i)})
+		d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.OrcaNitroReceipt{BlockNumber: uint64(i)})
 	}
 	time.Sleep(200 * time.Millisecond) // age 초과
 
 	// 새 메시지 push로 trim이 돌고, 이후 접속 시 오래된 backlog는 없어야 함
-	d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.ReceiptMsg{BlockNumber: 10})
+	d.Enqueue(orcanitrofeed.MsgReceipt, &orcanitrofeed.OrcaNitroReceipt{BlockNumber: 10})
 	time.Sleep(50 * time.Millisecond)
 
 	conn, err := net.Dial("unix", sock)
@@ -352,7 +352,7 @@ func TestDispatcherAgeEviction(t *testing.T) {
 		t.Fatalf("hello 먼저: %d", typ)
 	}
 	_, p := readFrame(t, conn)
-	var first orcanitrofeed.ReceiptMsg
+	var first orcanitrofeed.OrcaNitroReceipt
 	if _, err := first.UnmarshalMsg(p); err != nil {
 		t.Fatal(err)
 	}

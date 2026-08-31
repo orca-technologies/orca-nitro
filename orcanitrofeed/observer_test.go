@@ -67,7 +67,7 @@ func TestObserverTxModeDispatch(t *testing.T) {
 	if len(sink.msgs) != 1 || sink.msgs[0].typ != MsgReceipt {
 		t.Fatalf("tx 모드에서 즉시 dispatch돼야 함: %+v", sink.msgs)
 	}
-	msg := sink.msgs[0].msg.(*ReceiptMsg)
+	msg := sink.msgs[0].msg.(*OrcaNitroReceipt)
 	if msg.BlockNumber != 100 || msg.L2Timestamp != 1753689600 || msg.TxIndex != 1 {
 		t.Fatalf("블록 컨텍스트: %+v", msg)
 	}
@@ -123,7 +123,7 @@ func TestObserverBlockModeDispatch(t *testing.T) {
 	if len(sink.msgs) != 2 || sink.msgs[0].typ != MsgReceipt || sink.msgs[1].typ != MsgBlockSeal {
 		t.Fatalf("seal 후 receipt+BlockSeal: %+v", sink.msgs)
 	}
-	msg := sink.msgs[0].msg.(*ReceiptMsg)
+	msg := sink.msgs[0].msg.(*OrcaNitroReceipt)
 	if msg.BlockNumber != 200 || msg.TxIndex != 0 {
 		t.Fatalf("block 모드 컨텍스트: %+v", msg)
 	}
@@ -175,7 +175,7 @@ func TestObserverEmitsCollectorLogsWithInnerIndex(t *testing.T) {
 	tx, receipt := makeTxAndReceipt(to, 30, 1)
 	obs.OnTxAccepted(tx, sender, receipt, sdb, 0)
 
-	msg := sink.msgs[0].msg.(*ReceiptMsg)
+	msg := sink.msgs[0].msg.(*OrcaNitroReceipt)
 	if len(msg.Logs) != 1 || msg.Logs[0].InnerIndex != 1 {
 		t.Fatalf("로그 inner_index: %+v", msg.Logs)
 	}
@@ -197,7 +197,7 @@ func TestAccountKindEip7702(t *testing.T) {
 	tx, receipt := makeTxAndReceipt(to, 1, 1)
 	obs.OnTxAccepted(tx, sender, receipt, sdb, 0)
 
-	msg := sink.msgs[0].msg.(*ReceiptMsg)
+	msg := sink.msgs[0].msg.(*OrcaNitroReceipt)
 	if msg.FromAccountKind != AccountKindEmpty || msg.ToAccountKind != AccountKindEip7702 {
 		t.Fatalf("account kind: from=%d to=%d", msg.FromAccountKind, msg.ToAccountKind)
 	}
@@ -215,7 +215,7 @@ func TestObserverFallsBackWhenLogCountMismatches(t *testing.T) {
 	tx, receipt := makeTxAndReceipt(to, 1, 1)
 	obs.OnTxAccepted(tx, sender, receipt, sdb, 0)
 
-	msg := sink.msgs[0].msg.(*ReceiptMsg)
+	msg := sink.msgs[0].msg.(*OrcaNitroReceipt)
 	// 폴백: receipt.Logs가 그대로 실린다
 	if len(msg.Logs) != 1 || msg.Logs[0].Address != to {
 		t.Fatalf("폴백 실패: %+v", msg.Logs)

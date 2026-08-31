@@ -60,7 +60,7 @@ func init() {
 		// Nothing is lost — the wrapper delegatecalls back into the launcher and
 		// each inner frame is its own TARGET hit carrying the full launch
 		// metadata. At depth 0 (all observed entries) the wrapper Input also
-		// duplicates ReceiptMsg.Calldata, so the record is pure wire cost there;
+		// duplicates OrcaNitroReceipt.Calldata, so the record is pure wire cost there;
 		// what it uniquely captures is the wrapper frame itself when the
 		// launcher is entered by an inner call. If wire volume matters more,
 		// delete this line — no decoder depends on it.
@@ -80,12 +80,12 @@ func init() {
 	// matching is per-frame), so a router launch still yields createToken and
 	// distributeToken records with the same metadata.
 	//
-	// It is kept for the one case ReceiptMsg does not cover: the router being
+	// It is kept for the one case OrcaNitroReceipt does not cover: the router being
 	// entered by an inner call from another contract — unobserved so far (the
 	// router is 26.3% of launches, all of it top-level). For top-level entries
-	// ReceiptMsg already attributes the router (To is the tx recipient) and
+	// OrcaNitroReceipt already attributes the router (To is the tx recipient) and
 	// carries its entry-level salt and metadata blob (Calldata is the full
-	// tx.Data(), see NewReceiptMsg in observer.go), so there this record only
+	// tx.Data(), see NewOrcaNitroReceipt in observer.go), so there this record only
 	// duplicates them. If wire volume matters more, delete this line — no
 	// decoder depends on it.
 	add("0xa0177CF584E06f4E7876d7bf0b2D5016e0d8a1fa", [4]byte{0x27, 0xa1, 0x09, 0x8d}) // launch(string,string,(string,string,string,uint256),uint256,bytes32)

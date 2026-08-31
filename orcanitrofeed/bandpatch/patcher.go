@@ -131,7 +131,7 @@ func (p *Patcher) fetchBundle(ctx context.Context, n uint64) (*blockBundle, erro
 	}
 	p.headerTimes[n] = head.Time
 
-	// AccountKind 선계산 — NewReceiptMsg가 조회하는 집합은 정확히 {sender, to}다.
+	// AccountKind 선계산 — NewOrcaNitroReceipt가 조회하는 집합은 정확히 {sender, to}다.
 	// 번들에 담아두면 재사용 시 eth_getCode가 필요 없다.
 	kinds := make(map[string]uint8)
 	blockArg := hexutil.EncodeUint64(n)
@@ -345,7 +345,7 @@ func (p *Patcher) patchBlock(ctx context.Context, n uint64) error {
 		if len(logs) != len(receipts[i].Logs) {
 			p.stats.LogFallbacks++
 		}
-		msg := orcanitrofeed.NewReceiptMsg(n, head.Time, extra.L1BlockNumber, bundle.SameTimestampIndex, i,
+		msg := orcanitrofeed.NewOrcaNitroReceipt(n, head.Time, extra.L1BlockNumber, bundle.SameTimestampIndex, i,
 			env.tx, env.from, receipts[i], transfers, logs, calls, accountKind)
 		p.Sink.Enqueue(orcanitrofeed.MsgReceipt, msg)
 		receiptCount++

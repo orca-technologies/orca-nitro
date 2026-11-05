@@ -449,7 +449,11 @@ func mainImpl() int {
 		log.Error("error enabling ancient zstd", "err", err)
 		return 1
 	}
-	executionDB, initDataReader, l2BlockChain, dbFreshlyCreated, err := nitroinit.OpenInitializeExecutionDB(ctx, stack, nodeConfig, new(big.Int).SetUint64(nodeConfig.Chain.ID), gethexec.DefaultCacheConfigFor(&nodeConfig.Execution.Caching), tracer, &nodeConfig.Persistent, l1Client, rollupAddrs)
+	// The blocks re-executor reads old states while the chain does not advance. pathdb holds
+	// historic reads back while the head lags the wall clock ("syncing"), so the re-executor
+	// opens the indexer without that delay.
+	cacheConfig := gethexec.DefaultCacheConfigWithExtraFor(&nodeConfig.Execution.Caching, false, nodeConfig.BlocksReExecutor.Enable)
+	executionDB, initDataReader, l2BlockChain, dbFreshlyCreated, err := nitroinit.OpenInitializeExecutionDB(ctx, stack, nodeConfig, new(big.Int).SetUint64(nodeConfig.Chain.ID), cacheConfig, tracer, &nodeConfig.Persistent, l1Client, rollupAddrs)
 	if l2BlockChain != nil {
 		deferFuncs = append(deferFuncs, func() { l2BlockChain.Stop() })
 	}

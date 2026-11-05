@@ -158,7 +158,7 @@ func TestRetryableAutoRedeemSurvivesLargeGasLimit(t *testing.T) {
 
 			block, _, _, err := arbos.ProduceBlock(
 				msg, 1, lastHeader, statedb, chainContext, false,
-				core.NewMessageCommitContext(nil), false,
+				core.NewMessageCommitContext(nil), false, nil,
 			)
 			if err != nil {
 				t.Fatalf("ProduceBlock: %v", err)

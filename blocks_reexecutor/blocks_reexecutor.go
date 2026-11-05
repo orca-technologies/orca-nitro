@@ -154,6 +154,7 @@ type BlocksReExecutor struct {
 	// 실행한다 — hash 모드의 state 전진(FindLastAvailableState)이 불필요.
 	pathMode   bool
 	historicDB state.Database
+	jumpDests  vm.JumpDestCache // shared JUMPDEST analysis across reexecution threads
 
 	// skip-on-mismatch: worker들이 공유하는 report 파일 (nil = 미기록)
 	mismatchMu   sync.Mutex
@@ -257,7 +258,7 @@ func New(c *Config, blockchain *core.BlockChain, ethDb ethdb.Database) (*BlocksR
 	if pathMode {
 		// path archive: 과거 state는 state history freezer에서 직접 읽는다.
 		// (EnableStateIndexing은 archive 모드에서 켜짐 — core/blockchain.go)
-		historicDB = state.NewHistoricDatabase(ethDb, blockchain.TrieDB())
+		historicDB = state.NewHistoricDatabase(blockchain.TrieDB(), blockchain.CodeDB())
 	} else {
 		hashConfig := *hashdb.Defaults
 		hashConfig.CleanCacheSize = c.TrieCleanLimit * 1024 * 1024
@@ -302,6 +303,7 @@ func New(c *Config, blockchain *core.BlockChain, ethDb ethdb.Database) (*BlocksR
 		orcaRanges:    orcaRanges,
 		pathMode:      pathMode,
 		historicDB:    historicDB,
+		jumpDests:     core.NewJumpDestCache(),
 		mismatchMu:    sync.Mutex{},
 		mismatchFile:  mismatchFile,
 		skippedCount:  atomic.Uint64{},
@@ -513,7 +515,7 @@ func (s *BlocksReExecutor) reExecuteHistoricBlock(block *types.Block, statedb *s
 		// 최근 블록은 live pathdb(diff layer·persistent)에서, 오래된 블록은 state history
 		// freezer(HistoricReader)에서 읽는다.
 		var err error
-		statedb, err = s.blockchain.StateAt(parent.Root)
+		statedb, err = s.blockchain.StateAt(parent)
 		if err != nil {
 			statedb, err = state.New(parent.Root, s.historicDB)
 		}
@@ -525,7 +527,7 @@ func (s *BlocksReExecutor) reExecuteHistoricBlock(block *types.Block, statedb *s
 	if orcaObserver != nil {
 		vmConfig.Tracer = orcaObserver.Hooks()
 	}
-	result, err := s.blockchain.Processor().Process(block, statedb, vmConfig)
+	result, err := s.blockchain.Processor().Process(s.GetContext(), block, statedb, s.jumpDests, vmConfig)
 	if err != nil {
 		return nil, false, fmt.Errorf("processing block %d: %w", blockNum, err)
 	}
@@ -594,7 +596,9 @@ func (s *BlocksReExecutor) implAscending(ctx context.Context, startBlock, endBlo
 // 올바른 대응이다.
 func (s *BlocksReExecutor) waitForStateIndexing(ctx context.Context) error {
 	for {
-		remaining, err := s.blockchain.StateIndexProgress()
+		// Historic state reads need only the state history index; the trienode
+		// index (second value) is not consulted.
+		remaining, _, err := s.blockchain.StateIndexProgress()
 		if err != nil {
 			return fmt.Errorf("state index progress: %w", err)
 		}

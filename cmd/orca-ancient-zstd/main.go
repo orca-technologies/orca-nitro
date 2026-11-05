@@ -4,11 +4,13 @@
 // orca-ancient-zstd moves a stopped node's storage from snappy to zstd.
 //
 //	train      sample a freezer table and install a zstd dictionary for it
-//	recompress rewrite a freezer table with zstd, verify it, swap it in
+//	prepare    while the node runs: snapshot the sealed files, train, recompress them
+//	finish     after the node stops: recompress the rest, verify, swap it in
+//	recompress on a stopped node: train, prepare and finish in one go
 //	compact    rewrite a pebble database's sstables with zstd
 //	bench      time item reads of a freezer table
 //
-// Every command needs the node stopped. Run the node afterwards with
+// Every command but prepare needs the node stopped. Run the node afterwards with
 // --persistent.ancient-zstd.enable (and --persistent.pebble.zstd-databases for
 // compacted databases) so new data is written the same way.
 package main
@@ -34,6 +36,10 @@ func main() {
 	switch command, args := os.Args[1], os.Args[2:]; command {
 	case "train":
 		err = runTrain(args)
+	case "prepare":
+		err = runPrepare(ctx, args)
+	case "finish":
+		err = runFinish(ctx, args)
 	case "recompress":
 		err = runRecompress(ctx, args)
 	case "compact":
@@ -49,6 +55,6 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: orca-ancient-zstd train|recompress|compact|bench [flags]  (-h for flags)")
+	fmt.Fprintln(os.Stderr, "usage: orca-ancient-zstd train|prepare|finish|recompress|compact|bench [flags]  (-h for flags)")
 	os.Exit(2)
 }

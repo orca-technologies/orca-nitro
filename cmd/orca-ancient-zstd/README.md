@@ -30,16 +30,30 @@ flowchart LR
 | `--persistent.ancient-zstd.tables` | 대상 테이블 (비우면 압축 테이블 전부) |
 | `--persistent.pebble.zstd-databases` | zstd 로 쓸 pebble DB (`arbitrumdata`, `l2chaindata`, `wasm`) |
 
-## 변환 절차 (노드 정지 중)
+## 변환 절차
 
-| 단계 | 명령 |
-|---|---|
-| 사전 학습 | `orca-ancient-zstd train --dir <ancient>/chain --table bodies` |
-| 재압축 | `orca-ancient-zstd recompress --dir <ancient>/chain --table bodies --level 3 [--delete-old]` |
-| pebble | `orca-ancient-zstd compact --db <chain>/nitro/arbitrumdata` |
-| 읽기 측정 | `orca-ancient-zstd bench --dir <ancient>/chain --table bodies` |
+```mermaid
+flowchart LR
+  subgraph RUN["노드 실행 중"]
+    P["prepare<br/>닫힌 data 파일 스냅샷 → 사전 학습 → 재압축 · 전체 대조"]
+  end
+  subgraph STOP["노드 정지"]
+    F["finish<br/>그 뒤 항목 추가 · 대조 · 표본 재대조 → 교체"]
+  end
+  P --> F --> N["새 바이너리 + --persistent.ancient-zstd.enable 로 시작"]
+```
 
+| 명령 | 노드 | 하는 일 |
+|---|---|---|
+| `prepare --dir <ancient>/chain --table bodies` | 실행 중 가능 | `.recompress/<table>.snap` 에 닫힌 data 파일 하드링크 + 잘린 index. 사전이 없으면 스냅샷으로 학습해 테이블 폴더에 설치. `.recompress/<table>` 에 재압축 · 전체 대조 |
+| `finish --dir <ancient>/chain --table bodies [--delete-old]` | 정지 | prepare 뒤에 쌓인 항목 추가 · 대조, 준비분 표본 재대조, 교체. 옛 파일은 `.recompress/<table>.old` |
+| `recompress --dir … --table … [--delete-old]` | 정지 | 사전 학습(없을 때) + prepare + finish 한 번에 |
+| `train --dir … --table …` | 정지 | 사전만 학습 · 설치 |
+| `compact --db <chain>/nitro/arbitrumdata` | 정지 | pebble 전체 compaction 을 zstd 로 |
+| `bench --dir … --table …` | 정지 | 항목 읽기 시간 |
+
+- 스냅샷은 flush 된 index 의 head 파일 앞까지만 잡는다. freezer 는 head 파일에만 덧붙이고, 비정상 종료 뒤에는 flush 지점 뒤 항목만 자르므로 스냅샷 안의 항목은 바뀌지 않는다.
+- 하드링크라서 디스크를 추가로 쓰지 않는다 (같은 파일시스템, 파일 소유 계정으로 실행). 재압축본 크기만큼 여유가 필요하다.
 - `train` 은 `zstd` CLI(`--train`) 가 PATH 에 있어야 한다.
-- `recompress` 는 `<dir>/.recompress/<table>` 에 새 테이블을 만들고, 항목을 전부 옛 테이블과 대조한 뒤 교체한다. 옛 파일은 `<dir>/.recompress/<table>.old` 에 남는다 (`--delete-old` 면 지운다). 새 테이블 크기만큼 같은 파일시스템에 여유가 있어야 한다.
-- 테이블 하나씩 진행한다. 중간에 멈추면 `.recompress/<table>` 만 남고 원본은 그대로다.
-- 변환 뒤 노드를 `--persistent.ancient-zstd.enable` 로 띄워야 새 항목도 zstd 로 쓴다.
+- 교체 뒤에는 새 바이너리로만 열 수 있다 (옛 바이너리는 zstd 항목을 읽지 못한다). finish 와 바이너리 교체를 같은 정지 구간에서 한다.
+- 중간에 멈추면 `.recompress/` 만 남고 원본은 그대로다.

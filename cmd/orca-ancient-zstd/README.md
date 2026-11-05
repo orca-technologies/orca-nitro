@@ -1,6 +1,6 @@
 # orca-ancient-zstd
 
-멈춘 nitro 노드의 저장소를 snappy 에서 zstd 로 옮기는 도구.
+nitro 노드의 저장소를 snappy 에서 zstd 로 옮기는 도구. prepare 는 노드가 도는 동안, 나머지 명령은 노드를 멈추고 쓴다.
 
 ## 저장 형식
 

@@ -1,7 +1,7 @@
 // Copyright 2026, Offchain Labs, Inc.
 // For license information, see https://github.com/OffchainLabs/nitro/blob/master/LICENSE.md
 
-// orca-ancient-zstd moves a stopped node's storage from snappy to zstd.
+// orca-ancient-zstd moves a node's storage from snappy to zstd.
 //
 //	train      sample a freezer table and install a zstd dictionary for it
 //	prepare    while the node runs: snapshot the sealed files, train, recompress them

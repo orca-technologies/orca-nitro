@@ -445,6 +445,10 @@ func mainImpl() int {
 		return 1
 	}
 
+	if err := nodeConfig.Persistent.AncientZstd.Apply(); err != nil {
+		log.Error("error enabling ancient zstd", "err", err)
+		return 1
+	}
 	executionDB, initDataReader, l2BlockChain, dbFreshlyCreated, err := nitroinit.OpenInitializeExecutionDB(ctx, stack, nodeConfig, new(big.Int).SetUint64(nodeConfig.Chain.ID), gethexec.DefaultCacheConfigFor(&nodeConfig.Execution.Caching), tracer, &nodeConfig.Persistent, l1Client, rollupAddrs)
 	if l2BlockChain != nil {
 		deferFuncs = append(deferFuncs, func() { l2BlockChain.Stop() })

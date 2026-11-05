@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/spf13/pflag"
@@ -27,13 +28,14 @@ const (
 )
 
 type PersistentConfig struct {
-	GlobalConfig string       `koanf:"global-config"`
-	Chain        string       `koanf:"chain"`
-	LogDir       string       `koanf:"log-dir"`
-	Handles      int          `koanf:"handles"`
-	Ancient      string       `koanf:"ancient"`
-	DBEngine     string       `koanf:"db-engine"`
-	Pebble       PebbleConfig `koanf:"pebble"`
+	GlobalConfig string            `koanf:"global-config"`
+	Chain        string            `koanf:"chain"`
+	LogDir       string            `koanf:"log-dir"`
+	Handles      int               `koanf:"handles"`
+	Ancient      string            `koanf:"ancient"`
+	DBEngine     string            `koanf:"db-engine"`
+	Pebble       PebbleConfig      `koanf:"pebble"`
+	AncientZstd  AncientZstdConfig `koanf:"ancient-zstd"`
 }
 
 var PersistentConfigDefault = PersistentConfig{
@@ -44,6 +46,7 @@ var PersistentConfigDefault = PersistentConfig{
 	Ancient:      "",
 	DBEngine:     "", // auto-detect database type based on the db dir contents
 	Pebble:       PebbleConfigDefault,
+	AncientZstd:  AncientZstdConfigDefault,
 }
 
 func persistentConfigDefaultNoReadCompact() PersistentConfig {
@@ -62,6 +65,7 @@ func PersistentConfigAddOptions(prefix string, f *pflag.FlagSet, defaultConfig P
 	f.String(prefix+".ancient", defaultConfig.Ancient, "directory of ancient where the chain freezer can be opened")
 	f.String(prefix+".db-engine", defaultConfig.DBEngine, "backing database implementation to use. If set to empty string the database type will be autodetected and if no pre-existing database is found it will default to creating new pebble database ('leveldb', 'pebble' or '' = auto-detect)")
 	PebbleConfigAddOptions(prefix+".pebble", f, &defaultConfig.Pebble)
+	AncientZstdConfigAddOptions(prefix+".ancient-zstd", f, &defaultConfig.AncientZstd)
 }
 
 func (c *PersistentConfig) ResolveDirectoryNames() error {
@@ -125,12 +129,13 @@ func (c *PersistentConfig) Validate() error {
 			return err
 		}
 	}
-	return nil
+	return c.AncientZstd.Validate()
 }
 
 type PebbleConfig struct {
 	SyncMode                 bool                     `koanf:"sync-mode"`
 	MaxConcurrentCompactions int                      `koanf:"max-concurrent-compactions"`
+	ZstdDatabases            []string                 `koanf:"zstd-databases"`
 	Experimental             PebbleExperimentalConfig `koanf:"experimental"`
 }
 
@@ -158,6 +163,7 @@ var PebbleConfigDefaultNoReadCompact = pebbleConfigDefaultNoReadCompact()
 func PebbleConfigAddOptions(prefix string, f *pflag.FlagSet, defaultConfig *PebbleConfig) {
 	f.Bool(prefix+".sync-mode", defaultConfig.SyncMode, "if true sync mode is used (data needs to be written to WAL before the write is marked as completed)")
 	f.Int(prefix+".max-concurrent-compactions", defaultConfig.MaxConcurrentCompactions, "maximum number of concurrent compactions")
+	f.StringSlice(prefix+".zstd-databases", defaultConfig.ZstdDatabases, "databases whose new sstable blocks use zstd instead of snappy (e.g. arbitrumdata); old blocks change when compaction rewrites them")
 	PebbleExperimentalConfigAddOptions(prefix+".experimental", f, &defaultConfig.Experimental)
 }
 
@@ -344,6 +350,7 @@ func (c *PebbleConfig) ExtraOptions(namespace string) *pebble.ExtraOptions {
 			MaxWriterConcurrency:      c.Experimental.MaxWriterConcurrency,
 			ForceWriterParallelism:    c.Experimental.ForceWriterParallelism,
 		},
-		Levels: levels,
+		Levels:          levels,
+		ZstdCompression: slices.Contains(c.ZstdDatabases, namespace),
 	}
 }

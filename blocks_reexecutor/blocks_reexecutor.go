@@ -588,13 +588,19 @@ func (s *BlocksReExecutor) implAscending(ctx context.Context, startBlock, endBlo
 	}
 }
 
-// waitForStateIndexing — path archive 복원 직후 state history 인덱싱이 진행 중이면
-// historic read가 전부 "not fully indexed"로 실패한다. 완료까지 폴링 대기한다.
-// remaining==0은 indexer의 done 채널 기준이라 (pathdb indexIniter.remain) inited와
-// race가 없다. index metadata가 freezer tip보다 앞선 복구 상태면 remaining이 0으로
-// 내려오지 않는다 — geth가 "State indexer is in recovery"를 남기며, 스냅샷 재복원이
-// 올바른 대응이다.
+// waitForStateIndexing — 첫 range 시작 state 를 historic reader 로 열 수 있을 때까지 기다린다.
+// path archive 복원 직후엔 state history 인덱싱이 진행 중이라 historic read 가 전부 막힌다.
+// 인덱스 잔량(remaining)이 0 이어도 pathdb indexer 가 아직 inited 가 아니면 읽기가 막히므로
+// (head 가 실시각보다 6시간 넘게 뒤처지면 "syncing" 으로 보고 done 을 닫지 않는다) 잔량만으로
+// 판단하지 않고 reader 를 직접 열어 본다. index metadata 가 freezer tip 보다 앞선 복구 상태면
+// remaining 이 0 으로 내려오지 않는다 — geth 가 "State indexer is in recovery" 를 남기며,
+// 스냅샷 재복원이 올바른 대응이다.
 func (s *BlocksReExecutor) waitForStateIndexing(ctx context.Context) error {
+	start := s.blocks[0][0]
+	header := s.blockchain.GetHeaderByNumber(start)
+	if header == nil {
+		return fmt.Errorf("header of block %d not found", start)
+	}
 	for {
 		// Historic state reads need only the state history index; the trienode
 		// index (second value) is not consulted.
@@ -602,10 +608,15 @@ func (s *BlocksReExecutor) waitForStateIndexing(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("state index progress: %w", err)
 		}
-		if remaining == 0 {
+		_, readErr := s.blockchain.TrieDB().HistoricStateReader(header.Root)
+		if remaining == 0 && readErr == nil {
 			return nil
 		}
-		log.Info("Waiting for state history indexing before historic reexecution", "remaining", remaining)
+		// Only an unfinished index is worth waiting for; any other reader error is final.
+		if remaining == 0 && !strings.Contains(readErr.Error(), "fully indexed") {
+			return fmt.Errorf("historic state at block %d: %w", start, readErr)
+		}
+		log.Info("Waiting for state history indexing before historic reexecution", "remaining", remaining, "reader", readErr)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
